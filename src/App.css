@@ -1,0 +1,133 @@
+@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&display=swap");
+
+:root {
+  --bg: #0d1b2a;
+  --card: #1b263b;
+  --accent-blue: #4cc9f0;
+  --accent-orange: #ff9f1c;
+  --text-primary: #e0e1dd;
+  --text-secondary: #778da9;
+  --success: #00ff9c;
+  --danger: #ff4d4f;
+  --warning: #ffd166;
+}
+
+body {
+  margin: 0;
+  font-family: 'Josefin Sans', sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+}
+
+.app-container { max-width: 1200px; margin: 0 auto; padding: 20px; min-height: 100vh; }
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  background: rgba(27, 38, 59, 0.8);
+  backdrop-filter: blur(10px);
+  padding: 20px 30px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 20px;
+  z-index: 100;
+}
+
+.brand { font-size: 1.8rem; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+.brand .store { color: var(--accent-orange); }
+.brand .checklist { color: var(--accent-blue); }
+
+.nav-group { display: flex; gap: 10px; }
+
+.nav-btn {
+  padding: 12px 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(65, 90, 119, 0.3);
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center; gap: 10px;
+  transition: all 0.3s;
+}
+
+.nav-btn.active { background: var(--accent-blue); color: var(--bg); }
+.nav-btn.primary { background: var(--accent-blue); color: var(--bg); }
+.nav-btn.success { background: var(--success); color: var(--bg); }
+
+.card {
+  background: var(--card);
+  padding: 40px;
+  border-radius: 30px;
+  border: 1px solid rgba(255,255,255,0.05);
+  max-width: 850px;
+  margin: 0 auto;
+}
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+.input-wrapper { margin-bottom: 20px; }
+.input-label { font-size: 0.9rem; color: var(--accent-blue); margin-bottom: 8px; display: block; font-weight: 600; }
+.input-field {
+  width: 100%;
+  padding: 16px 20px;
+  border-radius: 16px;
+  border: 2px solid rgba(255,255,255,0.1);
+  background: rgba(13, 27, 42, 0.5);
+  color: white;
+  box-sizing: border-box;
+}
+
+.question-item {
+  margin-bottom: 16px;
+  background: rgba(13, 27, 42, 0.3);
+  padding: 16px 20px;
+  border-radius: 18px;
+  border-left: 4px solid var(--accent-blue);
+}
+
+.question-text { color: #ffc99c; margin-bottom: 12px; }
+
+.options { display: flex; gap: 8px; }
+.opt-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 2px solid transparent;
+  color: white;
+  cursor: pointer;
+}
+
+.opt-btn.active-yes { background: var(--success); color: var(--bg); }
+.opt-btn.active-no { background: var(--danger); color: white; }
+.opt-btn.active-na { background: var(--warning); color: var(--bg); }
+
+.progress-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-bottom: 20px; }
+.progress-fill { height: 100%; background: var(--accent-blue); transition: width 0.3s; }
+
+.admin-dashboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 25px; }
+.report-box { background: var(--card); border-radius: 24px; padding: 25px; border: 1px solid rgba(255,255,255,0.08); }
+
+.badge { padding: 4px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 800; }
+.badge-yes { background: var(--success); color: var(--bg); }
+.badge-no { background: var(--danger); color: white; }
+
+.scroll-answers { max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 12px; }
+.ans-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.85rem; }
+
+.empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 80px 40px;
+  background: rgba(27, 38, 59, 0.4);
+  border-radius: 32px;
+  border: 2px dashed rgba(76, 201, 240, 0.2);
+}
+
+.loader-screen { height: 100vh; display: flex; align-items: center; justify-content: center; }
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
