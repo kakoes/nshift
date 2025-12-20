@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ClipboardCheck,
   LayoutDashboard,
@@ -16,7 +16,11 @@ import {
   Plus,
   FileText,
   UserMinus,
-  AlertCircle
+  Search,
+  MessageSquare,
+  AlertCircle,
+  CheckCircle2,
+  Trophy
 } from "lucide-react";
 
 import { initializeApp } from "firebase/app";
@@ -135,6 +139,7 @@ const CustomStyles = () => (
     .nav-btn:active { transform: scale(0.96); }
     .nav-btn.active, .nav-btn.primary { background: var(--accent-blue); color: var(--bg); border: none; }
     .nav-btn.danger { background: rgba(255,77,79,0.15); color: var(--danger); border-color: var(--danger); }
+    .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; filter: grayscale(1); }
     
     .card { background: var(--card); padding: 20px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 16px; }
     
@@ -173,7 +178,7 @@ const CustomStyles = () => (
       position: fixed; 
       inset: 0; 
       background: rgba(0,0,0,0.85); 
-      backdrop-filter: blur(8px); 
+      backdrop-filter: blur(12px); 
       z-index: 1000; 
       display: flex; 
       align-items: center; 
@@ -190,10 +195,50 @@ const CustomStyles = () => (
       padding: 24px; 
       position: relative; 
       border: 1px solid rgba(255,255,255,0.1); 
+      animation: modalAppear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
     
+    @keyframes modalAppear {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    
+    .progress-bar-container {
+        width: 100%;
+        height: 8px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 4px;
+        margin: 10px 0;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: var(--accent-blue);
+        transition: width 0.3s ease;
+    }
+
     .animate-spin { animation: spin 1s linear infinite; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    .score-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 4px solid var(--accent-blue);
+      font-weight: 700;
+      font-size: 1.2rem;
+    }
+
+    .success-icon-bounce {
+      animation: bounce 0.6s infinite alternate;
+    }
+    @keyframes bounce {
+      from { transform: translateY(0); }
+      to { transform: translateY(-10px); }
+    }
 
     @media (max-width: 600px) {
       .admin-grid { grid-template-columns: 1fr !important; }
@@ -211,14 +256,18 @@ export default function App() {
   // Form State
   const [name, setName] = useState("");
   const [store, setStore] = useState("");
+  const [notes, setNotes] = useState("");
   const [dynamicQuestions, setDynamicQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [reports, setReports] = useState([]);
   const [allAdmins, setAllAdmins] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [submitStatus, setSubmitStatus] = useState("idle");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [lastSubmittedScore, setLastSubmittedScore] = useState({ yes: 0, total: 0 });
   const [pdfGenerating, setPdfGenerating] = useState(null);
   const [deleteId, setDeleteId] = useState(null); 
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Admin Actions State
   const [adminEmail, setAdminEmail] = useState("");
@@ -229,6 +278,30 @@ export default function App() {
   const [newQuestionText, setNewQuestionText] = useState("");
   const [userActionState, setUserActionState] = useState({ loading: false, error: null, success: false });
   const [loginError, setLoginError] = useState(null);
+
+  /* ================= CALCULATIONS ================= */
+  const answeredCount = useMemo(() => {
+    return Object.keys(answers).length;
+  }, [answers]);
+
+  const currentYesCount = useMemo(() => {
+    return Object.values(answers).filter(v => v === "Yes").length;
+  }, [answers]);
+
+  const isFormValid = useMemo(() => {
+    return name.trim() !== "" && 
+           store.trim() !== "" && 
+           answeredCount === dynamicQuestions.length;
+  }, [name, store, answeredCount, dynamicQuestions]);
+
+  const filteredReports = useMemo(() => {
+    if (!searchTerm) return reports;
+    const lowSearch = searchTerm.toLowerCase();
+    return reports.filter(r => 
+      r.store.toLowerCase().includes(lowSearch) || 
+      r.name.toLowerCase().includes(lowSearch)
+    );
+  }, [reports, searchTerm]);
 
   /* ================= PDF ENGINE ================= */
   const downloadPDF = async (report) => {
@@ -251,8 +324,6 @@ export default function App() {
       await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js");
 
       const { jsPDF } = window.jspdf;
-      if (!jsPDF) throw new Error("jsPDF constructor not found");
-
       const doc = new jsPDF();
       const dateStr = report.createdAt?.toDate 
         ? report.createdAt.toDate().toLocaleString() 
@@ -300,8 +371,17 @@ export default function App() {
         }
       });
 
-      const fileName = `CK_Report_${report.store}_${Date.now()}.pdf`;
-      doc.save(fileName);
+      if (report.notes) {
+        const finalY = doc.lastAutoTable.finalY + 10;
+        doc.setTextColor(40, 40, 40);
+        doc.setFont("helvetica", "bold");
+        doc.text("SHIFT SUMMARY / NOTES:", 15, finalY);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(report.notes, 15, finalY + 7, { maxWidth: 180 });
+      }
+
+      doc.save(`CK_Report_${report.store}_${Date.now()}.pdf`);
     } catch (err) {
       console.error("PDF Download Failed:", err);
     } finally {
@@ -316,13 +396,10 @@ export default function App() {
         setUser(u);
         const adminDoc = await getDoc(doc(db, "admins", u.uid));
         if (adminDoc.exists()) setAdminRole(adminDoc.data().role);
-        
-        // AUTO-NAVIGATE TO DASHBOARD ON LOGIN OR PERSISTENT SESSION
         setView("admin");
       } else {
         setUser(null);
         setAdminRole(null);
-        // Only reset to form if user explicitly signs out
         if (view !== "login") setView("form");
       }
       setLoading(false);
@@ -354,24 +431,33 @@ export default function App() {
     setLoginError(null);
     try {
       await signInWithEmailAndPassword(auth, adminEmail, adminPass);
-      // The onAuthStateChanged listener above catches this and sets view to "admin" automatically
     } catch (err) {
       setLoginError("Invalid email or password.");
     }
   };
 
   const submitForm = async () => {
-    if (!name || !store) return setSubmitStatus("error");
+    if (!isFormValid) return;
     setSubmitStatus("submitting");
     try {
-      const yesCount = Object.values(answers).filter(v => v === "Yes").length;
       await addDoc(collection(db, "store_checklists"), {
-        name, store, answers, yesCount, totalQuestions: dynamicQuestions.length, createdAt: serverTimestamp(),
+        name, store, answers, notes, yesCount: currentYesCount, totalQuestions: dynamicQuestions.length, createdAt: serverTimestamp(),
       });
-      setName(""); setStore(""); setAnswers({}); setSubmitStatus("success");
+      setLastSubmittedScore({ yes: currentYesCount, total: dynamicQuestions.length });
+      setSubmitStatus("success");
+      setShowSuccessModal(true);
+      
+      // Reset form
+      setName(""); setStore(""); setAnswers({}); setNotes("");
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setTimeout(() => setSubmitStatus("idle"), 4000);
-    } catch (e) { setSubmitStatus("error"); }
+    } catch (e) { 
+      setSubmitStatus("error"); 
+    }
+  };
+
+  const closeSuccessModal = () => {
+    setShowSuccessModal(false);
+    setSubmitStatus("idle");
   };
 
   const addQuestion = async () => {
@@ -435,7 +521,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* LOGIN VIEW - Automatically disappears if user state changes */}
       {(view === "login" && !user) && (
         <div className="card" style={{maxWidth: '400px', margin: '40px auto'}}>
           <h2 style={{marginTop: 0, textAlign: 'center'}}><ShieldCheck size={28} color="var(--accent-blue)"/> Admin Access</h2>
@@ -450,14 +535,40 @@ export default function App() {
 
       {view === "form" && (
         <div className="card" style={{maxWidth: '700px', margin: '0 auto', padding: '16px'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: '10px'}}>
+            <div style={{flex: 1}}>
+              <h2 style={{margin:0}}>Store Audit</h2>
+              <p style={{margin:0, opacity:0.6, fontSize:'0.85rem'}}>Please answer all questions below.</p>
+            </div>
+            <div className="score-badge" style={{borderColor: currentYesCount === dynamicQuestions.length ? 'var(--success)' : 'var(--accent-blue)'}}>
+              {currentYesCount}/{dynamicQuestions.length}
+            </div>
+          </div>
+
+          <div style={{marginBottom: '20px'}}>
+             <div style={{display:'flex', justifyContent:'space-between', fontSize:'0.75rem', fontWeight:700, marginBottom:'4px', color:'var(--accent-blue)'}}>
+                 <span>COMPLETION PROGRESS</span>
+                 <span>{answeredCount} / {dynamicQuestions.length}</span>
+             </div>
+             <div className="progress-bar-container">
+                 <div className="progress-bar-fill" style={{width: `${(answeredCount/dynamicQuestions.length) * 100}%`}}></div>
+             </div>
+          </div>
+
           <div className="form-meta" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'20px'}}>
-            <input className="input-field" placeholder="Inspector Name" value={name} onChange={e => setName(e.target.value)} />
-            <input className="input-field" placeholder="Store Number" value={store} onChange={e => setStore(e.target.value)} />
+            <div>
+              <label style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginLeft:'8px'}}>INSPECTOR NAME *</label>
+              <input className="input-field" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} />
+            </div>
+            <div>
+              <label style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginLeft:'8px'}}>STORE NUMBER *</label>
+              <input className="input-field" placeholder="e.g. 1234" value={store} onChange={e => setStore(e.target.value)} />
+            </div>
           </div>
           
           <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
             {dynamicQuestions.map((q, i) => (
-              <div key={i} style={{background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)'}}>
+              <div key={i} style={{background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '16px', border: answers[q] ? '1px solid rgba(0, 255, 156, 0.2)' : '1px solid rgba(255,255,255,0.05)'}}>
                 <p style={{margin: '0 0 12px 0', fontSize: '1rem', lineHeight: '1.4', fontWeight: 600}}>{q}</p>
                 <div className="opt-group">
                   {["Yes", "No", "N/A"].map(o => (
@@ -474,16 +585,49 @@ export default function App() {
             ))}
           </div>
 
-          <button className="nav-btn primary" style={{width: '100%', marginTop: '24px', padding: '18px', justifyContent: 'center', fontSize: '1.1rem'}} onClick={submitForm} disabled={submitStatus === "submitting"}>
-            {submitStatus === "submitting" ? <Loader2 className="animate-spin" /> : 'Complete Inspection'}
+          <div style={{marginTop:'24px'}}>
+            <label style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginLeft:'8px', display:'flex', alignItems:'center', gap:'4px'}}><MessageSquare size={14}/> SHIFT SUMMARY / NOTES</label>
+            <textarea 
+              className="input-field" 
+              placeholder="Record any issues, maintenance needs, or special comments here..." 
+              rows={4} 
+              style={{resize: 'none', height: '100px'}}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+            />
+          </div>
+
+          <button 
+            className="nav-btn primary" 
+            style={{width: '100%', marginTop: '24px', padding: '18px', justifyContent: 'center', fontSize: '1.1rem'}} 
+            onClick={submitForm} 
+            disabled={!isFormValid || submitStatus === "submitting"}
+          >
+            {submitStatus === "submitting" ? <Loader2 className="animate-spin" /> : 
+             !isFormValid ? `Finish answering to Submit` : 'Complete & Submit'}
           </button>
-          {submitStatus === "success" && <div style={{color: 'var(--success)', textAlign: 'center', marginTop: '15px', fontWeight: 'bold'}}>✓ Report Submitted!</div>}
-          {submitStatus === "error" && <div style={{color: 'var(--danger)', textAlign: 'center', marginTop: '15px'}}>⚠ Name and Store # Required</div>}
+          
+          {!isFormValid && answeredCount < dynamicQuestions.length && (
+              <div style={{display:'flex', alignItems:'center', gap:'6px', color:'var(--danger)', fontSize:'0.85rem', marginTop:'12px', justifyContent:'center'}}>
+                  <AlertCircle size={14}/> {dynamicQuestions.length - answeredCount} questions remaining
+              </div>
+          )}
         </div>
       )}
 
       {view === "admin" && user && (
         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
+          <div className="card" style={{margin:0, padding:'16px', display:'flex', alignItems:'center', gap:'12px'}}>
+            <Search size={20} color="var(--text-secondary)"/>
+            <input 
+              className="input-field" 
+              style={{background:'none', border:'none', padding:0}} 
+              placeholder="Filter by Store or Inspector..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+
           {adminRole === "super" && (
             <div className="admin-grid" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
               <div className="card" style={{margin: 0}}>
@@ -534,7 +678,7 @@ export default function App() {
           )}
 
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'16px'}}>
-            {reports.map(r => (
+            {filteredReports.map(r => (
               <div key={r.id} className="card" style={{margin:0, padding:'18px'}}>
                 <div style={{display:'flex', justifyContent:'space-between', marginBottom:'12px'}}>
                   <span style={{fontSize:'1.2rem', fontWeight:700, color:'var(--accent-orange)'}}>Store #{r.store}</span>
@@ -555,11 +699,37 @@ export default function App() {
                 </div>
               </div>
             ))}
+            {filteredReports.length === 0 && (
+              <div style={{textAlign:'center', gridColumn:'1/-1', padding:'40px', opacity:0.5}}>No reports found.</div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Modals */}
+      {/* SUCCESS MODAL */}
+      {showSuccessModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{textAlign:'center', padding:'40px 20px'}}>
+            <div style={{marginBottom:'20px'}}>
+               <CheckCircle2 size={80} color="var(--success)" className="success-icon-bounce" />
+            </div>
+            <h1 style={{margin:'0 0 10px 0', fontSize:'2rem'}}>Audit Complete!</h1>
+            <p style={{opacity:0.8, fontSize:'1.1rem', margin:'0 0 24px 0'}}>The report has been successfully submitted to the management dashboard.</p>
+            
+            <div style={{background:'rgba(0,255,156,0.1)', border:'1px solid rgba(0,255,156,0.2)', borderRadius:'20px', padding:'20px', marginBottom:'30px'}}>
+                <div style={{fontSize:'0.8rem', fontWeight:700, color:'var(--success)', letterSpacing:'1px', marginBottom:'5px'}}>FINAL SCORE</div>
+                <div style={{fontSize:'3rem', fontWeight:800, color:'var(--success)'}}>{lastSubmittedScore.yes} / {lastSubmittedScore.total}</div>
+                <div style={{fontSize:'0.9rem', opacity:0.7}}>Tasks marked as "Yes"</div>
+            </div>
+
+            <button className="nav-btn primary" style={{width:'100%', padding:'18px', justifyContent:'center', fontSize:'1.1rem'}} onClick={closeSuccessModal}>
+              Return to Form
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
       {deleteId && (
         <div className="modal-overlay">
           <div className="modal-content" style={{textAlign:'center'}}>
@@ -573,6 +743,7 @@ export default function App() {
         </div>
       )}
 
+      {/* View Report Modal */}
       {selectedReport && (
         <div className="modal-overlay" onClick={() => setSelectedReport(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -590,6 +761,12 @@ export default function App() {
                   <span style={{fontWeight:800, color: a === 'Yes' ? 'var(--success)' : a === 'No' ? 'var(--danger)' : 'var(--warning)'}}>{a}</span>
                 </div>
               ))}
+              {selectedReport.notes && (
+                <div style={{marginTop:'15px', padding:'15px', borderTop:'1px solid rgba(255,255,255,0.1)'}}>
+                  <div style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginBottom:'8px'}}>SHIFT SUMMARY</div>
+                  <div style={{fontSize:'0.9rem', lineHeight:1.5, background:'rgba(0,0,0,0.2)', padding:'12px', borderRadius:'8px'}}>{selectedReport.notes}</div>
+                </div>
+              )}
             </div>
             <button className="nav-btn primary" style={{width:'100%', marginTop:'24px', padding:'18px', justifyContent:'center'}} onClick={() => downloadPDF(selectedReport)}>
               {pdfGenerating === selectedReport.id ? <Loader2 size={18} className="animate-spin"/> : <FileText size={18}/>} Export PDF
