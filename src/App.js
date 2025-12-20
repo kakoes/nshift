@@ -8,9 +8,8 @@ import {
   Download,
   Trash2,
   Clock,
-  X,
-  Printer,
 } from "lucide-react";
+
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -28,8 +27,7 @@ import {
   serverTimestamp,
   enableIndexedDbPersistence,
 } from "firebase/firestore";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+
 import "./App.css";
 
 /* ================= FIREBASE ================= */
@@ -94,8 +92,6 @@ export default function App() {
   );
 
   const [reports, setReports] = useState([]);
-  const [activeReport, setActiveReport] = useState(null);
-  const [printPreview, setPrintPreview] = useState(null);
 
   const [submitStatus, setSubmitStatus] = useState("idle");
   const [cooldown, setCooldown] = useState(0);
@@ -132,22 +128,29 @@ export default function App() {
 
   const logout = async () => {
     await signOut(auth);
-    setUser(null);
-    setView("admin"); // ✅ FIX: login form reappears
+    setView("form");
   };
 
   /* ================= FIRESTORE ================= */
 
   useEffect(() => {
     if (view !== "admin") return;
+
     const unsub = onSnapshot(collection(db, "store_checklists"), snap => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const data = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
       data.sort(
         (a, b) =>
-          (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+          (b.createdAt?.seconds || 0) -
+          (a.createdAt?.seconds || 0)
       );
+
       setReports(data);
     });
+
     return () => unsub();
   }, [view]);
 
@@ -155,7 +158,9 @@ export default function App() {
 
   useEffect(() => {
     if (cooldown === 0) return;
-    const t = setInterval(() => setCooldown(c => c - 1), 1000);
+    const t = setInterval(() => {
+      setCooldown(c => c - 1);
+    }, 1000);
     return () => clearInterval(t);
   }, [cooldown]);
 
@@ -167,10 +172,14 @@ export default function App() {
 
     setSubmitStatus("submitting");
 
+    const yesCount = Object.values(answers).filter(v => v === "Yes").length;
+
     await addDoc(collection(db, "store_checklists"), {
       name,
       store,
       answers,
+      yesCount,
+      totalQuestions: QUESTIONS.length,
       createdAt: serverTimestamp(),
     });
 
@@ -185,45 +194,23 @@ export default function App() {
     await deleteDoc(doc(db, "store_checklists", id));
   };
 
-  /* ================= PDF ================= */
-
-  const exportPDF = r => {
-    const pdf = new jsPDF();
-    const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date();
-
-    pdf.setFontSize(16);
-    pdf.text("Circle K Store Checklist Report", 14, 18);
-
-    pdf.setFontSize(10);
-    pdf.text(`Store #: ${r.store}`, 14, 28);
-    pdf.text(`Inspector: ${r.name}`, 14, 34);
-    pdf.text(`Date: ${d.toLocaleDateString()}`, 14, 40);
-    pdf.text(`Time: ${d.toLocaleTimeString()}`, 14, 46);
-
-    autoTable(pdf, {
-      startY: 54,
-      head: [["Checklist Item", "Answer"]],
-      body: Object.entries(r.answers),
-      styles: { fontSize: 8 },
-    });
-
-    pdf.save(`Store_${r.store}_${d.getTime()}.pdf`);
-  };
-
-  /* ================= FILTER ================= */
+  /* ================= FILTER + PAGINATION ================= */
 
   const filtered = reports.filter(r => {
     const storeMatch = filterStore
       ? r.store?.includes(filterStore)
       : true;
+
     const dateMatch =
       filterDate && r.createdAt?.toDate
         ? r.createdAt.toDate().toISOString().slice(0, 10) === filterDate
         : true;
+
     return storeMatch && dateMatch;
   });
 
   const totalPages = Math.ceil(filtered.length / REPORTS_PER_PAGE);
+
   const paginated = filtered.slice(
     (page - 1) * REPORTS_PER_PAGE,
     page * REPORTS_PER_PAGE
@@ -241,7 +228,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* ================= HEADER ================= */}
+      {/* HEADER */}
       <div className="header">
         <div className="brand">
           <ClipboardCheck />
@@ -249,7 +236,8 @@ export default function App() {
           <span className="checklist">Checklist</span>
         </div>
 
-        <div className="nav-group">
+        {/* BUTTONS MOVED UNDER TITLE */}
+        <div className="nav-group header-nav">
           <button
             className={`nav-btn ${view === "form" ? "active" : ""}`}
             onClick={() => setView("form")}
@@ -257,52 +245,65 @@ export default function App() {
             <ClipboardCheck size={18} /> Form
           </button>
 
-          <button
-            className={`nav-btn ${view === "admin" ? "active" : ""}`}
-            onClick={() => setView("admin")}
-          >
-            <LayoutDashboard size={18} /> Admin
-          </button>
-
           {user?.email && (
+            <button
+              className={`nav-btn ${view === "admin" ? "active" : ""}`}
+              onClick={() => setView("admin")}
+            >
+              <LayoutDashboard size={18} /> Admin
+            </button>
+          )}
+
+          {user?.email ? (
             <button className="nav-btn" onClick={logout}>
               <LogOut size={18} /> Logout
+            </button>
+          ) : (
+            <button className="nav-btn" onClick={() => setView("admin")}>
+              <LogIn size={18} /> Admin Login
             </button>
           )}
         </div>
       </div>
 
-      {/* ================= ADMIN LOGIN ================= */}
-      {view === "admin" && !user && (
+      {/* ADMIN LOGIN */}
+      {view === "admin" && !user?.email && (
         <div className="card">
           <h2>Admin Login</h2>
-          <input
-            className="input-field"
-            placeholder="Email"
-            value={adminEmail}
-            onChange={e => setAdminEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            className="input-field"
-            placeholder="Password"
-            value={adminPass}
-            onChange={e => setAdminPass(e.target.value)}
-          />
+
+          <div className="form-grid">
+            <div className="input-wrapper">
+              <label className="input-label">Email</label>
+              <input
+                className="input-field"
+                value={adminEmail}
+                onChange={e => setAdminEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="input-wrapper">
+              <label className="input-label">Password</label>
+              <input
+                type="password"
+                className="input-field"
+                value={adminPass}
+                onChange={e => setAdminPass(e.target.value)}
+              />
+            </div>
+          </div>
+
           <button className="nav-btn primary" onClick={loginAdmin}>
             Login
           </button>
+
           {adminError && <div className="status error">{adminError}</div>}
         </div>
       )}
 
-      {/* ================= FORM ================= */}
+      {/* FORM */}
       {view === "form" && (
         <div className="card">
-          <div
-            className="form-grid"
-            style={{ gridTemplateColumns: "1fr", gap: 12 }} // ✅ mobile-first fix
-          >
+          <div className="form-grid">
             <div className="input-wrapper">
               <label className="input-label">Name</label>
               <input
@@ -318,9 +319,7 @@ export default function App() {
                 className="input-field"
                 maxLength={7}
                 value={store}
-                onChange={e =>
-                  setStore(e.target.value.replace(/\D/g, ""))
-                }
+                onChange={e => setStore(e.target.value.replace(/\D/g, ""))}
               />
             </div>
           </div>
@@ -333,7 +332,13 @@ export default function App() {
                   <button
                     key={opt}
                     className={`opt-btn ${
-                      answers[q] === opt ? "active-yes" : ""
+                      answers[q] === opt
+                        ? opt === "Yes"
+                          ? "active-yes"
+                          : opt === "No"
+                          ? "active-no"
+                          : "active-na"
+                        : ""
                     }`}
                     onClick={() =>
                       setAnswers({ ...answers, [q]: opt })
@@ -346,26 +351,32 @@ export default function App() {
             </div>
           ))}
 
-          {cooldown === 0 ? (
+          {cooldown === 0 && (
             <button className="nav-btn success" onClick={submitForm}>
               Submit Checklist
             </button>
-          ) : (
+          )}
+
+          {cooldown > 0 && (
             <div className="status info">
               You can submit again in {cooldown}s
+            </div>
+          )}
+
+          {submitStatus === "error" && (
+            <div className="status error">
+              Name and 7-digit store required
             </div>
           )}
         </div>
       )}
 
-      {/* ================= ADMIN ================= */}
-      {view === "admin" && user && (
+      {/* ADMIN */}
+      {view === "admin" && user?.email && (
         <>
+          {/* FILTERS RESTORED */}
           <div className="card">
-            <div
-              className="form-grid"
-              style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}
-            >
+            <div className="form-grid">
               <div className="input-wrapper">
                 <label className="input-label">Filter Store</label>
                 <input
@@ -394,13 +405,10 @@ export default function App() {
                 : null;
 
               return (
-                <div
-                  key={r.id}
-                  className="report-box compact"
-                  onClick={() => setActiveReport(r)}
-                >
+                <div key={r.id} className="report-box compact">
                   <h3>Store #{r.store}</h3>
                   <p>{r.name}</p>
+
                   {d && (
                     <p className="report-time">
                       <Clock size={12} />{" "}
@@ -408,90 +416,42 @@ export default function App() {
                       {d.toLocaleTimeString()}
                     </p>
                   )}
+
+                  <div className="nav-group">
+                    <button
+                      className="nav-btn"
+                      onClick={() => deleteReport(r.id)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
+
+          <div className="nav-group pagination">
+            <button
+              className="nav-btn"
+              disabled={page === 1}
+              onClick={() => setPage(p => p - 1)}
+            >
+              Prev
+            </button>
+
+            <span>
+              Page {page} / {totalPages}
+            </span>
+
+            <button
+              className="nav-btn"
+              disabled={page === totalPages}
+              onClick={() => setPage(p => p + 1)}
+            >
+              Next
+            </button>
+          </div>
         </>
-      )}
-
-      {/* ================= REPORT MODAL ================= */}
-      {activeReport && (
-        <div className="modal-overlay">
-          <div className="modal-card">
-            <button
-              className="modal-close"
-              onClick={() => setActiveReport(null)}
-            >
-              <X />
-            </button>
-
-            <h2>Store #{activeReport.store}</h2>
-            <p>{activeReport.name}</p>
-
-            {Object.entries(activeReport.answers).map(([q, a]) => (
-              <div key={q} className="print-row">
-                <span>{q}</span>
-                <strong>{a}</strong>
-              </div>
-            ))}
-
-            <div className="nav-group">
-              <button
-                className="nav-btn"
-                onClick={() => exportPDF(activeReport)}
-              >
-                <Download size={16} />
-              </button>
-              <button
-                className="nav-btn"
-                onClick={() => setPrintPreview(activeReport)}
-              >
-                <Printer size={16} />
-              </button>
-              <button
-                className="nav-btn"
-                onClick={() => deleteReport(activeReport.id)}
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ================= PRINT PREVIEW ================= */}
-      {printPreview && (
-        <div className="modal-overlay print-preview">
-          <div className="modal-card print-card">
-            <button
-              className="modal-close no-print"
-              onClick={() => setPrintPreview(null)}
-            >
-              <X />
-            </button>
-
-            <h2>Circle K Store Checklist</h2>
-            <p>Store: {printPreview.store}</p>
-            <p>Inspector: {printPreview.name}</p>
-
-            {Object.entries(printPreview.answers).map(([q, a]) => (
-              <div key={q} className="print-row">
-                <span>{q}</span>
-                <strong>{a}</strong>
-              </div>
-            ))}
-
-            <div className="nav-group no-print">
-              <button
-                className="nav-btn primary"
-                onClick={() => window.print()}
-              >
-                Print
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
