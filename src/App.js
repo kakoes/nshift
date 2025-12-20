@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   ClipboardCheck,
   LayoutDashboard,
@@ -20,7 +20,9 @@ import {
   MessageSquare,
   AlertCircle,
   CheckCircle2,
-  Trophy
+  QrCode,
+  Copy,
+  Check
 } from "lucide-react";
 
 import { initializeApp } from "firebase/app";
@@ -156,6 +158,7 @@ const CustomStyles = () => (
       box-sizing: border-box;
     }
     .input-field:focus { border-color: var(--accent-blue); }
+    .input-field.highlight { border-color: var(--accent-orange); box-shadow: 0 0 10px rgba(255, 159, 28, 0.2); }
     
     .opt-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 100%; }
     .opt-btn { 
@@ -240,6 +243,14 @@ const CustomStyles = () => (
       to { transform: translateY(-10px); }
     }
 
+    .qr-canvas-container {
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      display: inline-block;
+      margin: 10px 0;
+    }
+
     @media (max-width: 600px) {
       .admin-grid { grid-template-columns: 1fr !important; }
       .form-meta { grid-template-columns: 1fr !important; }
@@ -268,6 +279,13 @@ export default function App() {
   const [pdfGenerating, setPdfGenerating] = useState(null);
   const [deleteId, setDeleteId] = useState(null); 
   const [searchTerm, setSearchTerm] = useState("");
+  const [isStorePrefilled, setIsStorePrefilled] = useState(false);
+
+  // QR Logic State
+  const [qrStoreInput, setQrStoreInput] = useState("");
+  const [qrLink, setQrLink] = useState("");
+  const [copied, setCopied] = useState(false);
+  const qrRef = useRef(null);
 
   // Admin Actions State
   const [adminEmail, setAdminEmail] = useState("");
@@ -302,6 +320,57 @@ export default function App() {
       r.name.toLowerCase().includes(lowSearch)
     );
   }, [reports, searchTerm]);
+
+  /* ================= QR CODE ENGINE ================= */
+  useEffect(() => {
+    // Check for store param in URL: ?store=1234
+    const params = new URLSearchParams(window.location.search);
+    const storeParam = params.get('store');
+    if (storeParam) {
+      setStore(storeParam);
+      setIsStorePrefilled(true);
+    }
+  }, []);
+
+  const generateQR = async () => {
+    if (!qrStoreInput) return;
+    const baseUrl = window.location.origin + window.location.pathname;
+    const finalUrl = `${baseUrl}?store=${qrStoreInput}`;
+    setQrLink(finalUrl);
+
+    // Load QRCode library dynamically
+    if (!window.QRCode) {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+      script.onload = () => createQRImage(finalUrl);
+      document.head.appendChild(script);
+    } else {
+      createQRImage(finalUrl);
+    }
+  };
+
+  const createQRImage = (url) => {
+    if (qrRef.current) qrRef.current.innerHTML = "";
+    new window.QRCode(qrRef.current, {
+      text: url,
+      width: 128,
+      height: 128,
+      colorDark: "#000000",
+      colorLight: "#ffffff",
+      correctLevel: window.QRCode.CorrectLevel.H
+    });
+  };
+
+  const copyQrLink = () => {
+    const el = document.createElement('textarea');
+    el.value = qrLink;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   /* ================= PDF ENGINE ================= */
   const downloadPDF = async (report) => {
@@ -447,8 +516,10 @@ export default function App() {
       setSubmitStatus("success");
       setShowSuccessModal(true);
       
-      // Reset form
-      setName(""); setStore(""); setAnswers({}); setNotes("");
+      // Reset form (keep prefilled store if applicable)
+      setName(""); setAnswers({}); setNotes("");
+      if (!isStorePrefilled) setStore("");
+      
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { 
       setSubmitStatus("error"); 
@@ -528,7 +599,7 @@ export default function App() {
             <input placeholder="Email" className="input-field" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} />
             <input placeholder="Password" type="password" className="input-field" value={adminPass} onChange={e => setAdminPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
             {loginError && <div style={{color: 'var(--danger)', fontSize: '0.85rem', textAlign: 'center'}}>{loginError}</div>}
-            <button className="nav-btn primary" style={{padding:'16px', justifyContent:'center'}} onClick={handleLogin}>Sign In</button>
+            <button className="nav-btn primary" style={{justifyContent:'center', padding: '16px'}} onClick={handleLogin}>Sign In</button>
           </div>
         </div>
       )}
@@ -561,8 +632,15 @@ export default function App() {
               <input className="input-field" placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} />
             </div>
             <div>
-              <label style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginLeft:'8px'}}>STORE NUMBER *</label>
-              <input className="input-field" placeholder="e.g. 1234" value={store} onChange={e => setStore(e.target.value)} />
+              <label style={{fontSize:'0.75rem', color:'var(--accent-orange)', fontWeight:700, marginLeft:'8px'}}>STORE NUMBER * {isStorePrefilled && '(Auto-filled)'}</label>
+              <input 
+                className={`input-field ${isStorePrefilled ? 'highlight' : ''}`} 
+                placeholder="e.g. 1234" 
+                value={store} 
+                onChange={e => setStore(e.target.value)} 
+                readOnly={isStorePrefilled}
+              />
+              {isStorePrefilled && <div style={{fontSize: '0.65rem', color: 'var(--accent-orange)', marginTop: '4px', textAlign: 'right'}}>Verification Lock Active</div>}
             </div>
           </div>
           
@@ -617,6 +695,8 @@ export default function App() {
 
       {view === "admin" && user && (
         <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
+          
+          {/* Dashboard Stats / Search */}
           <div className="card" style={{margin:0, padding:'16px', display:'flex', alignItems:'center', gap:'12px'}}>
             <Search size={20} color="var(--text-secondary)"/>
             <input 
@@ -629,6 +709,8 @@ export default function App() {
           </div>
 
           {adminRole === "super" && (
+            <>
+            {/* Super Admin Management Row */}
             <div className="admin-grid" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
               <div className="card" style={{margin: 0}}>
                 <h3 style={{marginTop:0, display:'flex', alignItems:'center', gap:'8px'}}><ListChecks size={20}/> Task Editor</h3>
@@ -675,8 +757,37 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* QR Code Generator Section */}
+            <div className="card" style={{margin:0}}>
+               <h3 style={{marginTop:0, display:'flex', alignItems:'center', gap:'8px'}}><QrCode size={20}/> Store QR Generator</h3>
+               <p style={{fontSize:'0.85rem', opacity:0.7, marginBottom:'15px'}}>Generate a unique QR code for a specific store. When scanned, the store number will be locked into the form automatically.</p>
+               <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'12px', alignItems:'start'}}>
+                  <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                    <input className="input-field" placeholder="Enter Store Number (e.g. 1042)" value={qrStoreInput} onChange={e => setQrStoreInput(e.target.value)} />
+                    <button className="nav-btn primary" style={{justifyContent:'center', padding:'14px'}} onClick={generateQR}>Generate QR Code</button>
+                    {qrLink && (
+                      <div style={{background:'rgba(0,0,0,0.2)', padding:'12px', borderRadius:'12px', marginTop:'10px'}}>
+                        <div style={{fontSize:'0.7rem', color:'var(--accent-blue)', fontWeight:700, marginBottom:'4px'}}>DIRECT LINK</div>
+                        <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+                          <div style={{fontSize:'0.75rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, opacity:0.8}}>{qrLink}</div>
+                          <button onClick={copyQrLink} style={{background:'none', border:'none', color:'var(--accent-blue)', cursor:'pointer'}}>{copied ? <Check size={16}/> : <Copy size={16}/>}</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{textAlign:'center'}}>
+                    <div className="qr-canvas-container" ref={qrRef}>
+                      <div style={{width:128, height:128, display:'flex', alignItems:'center', justifyContent:'center', border:'2px dashed #ccc', color:'#ccc'}}>QR Preview</div>
+                    </div>
+                    {qrLink && <div style={{fontSize:'0.7rem', color:'var(--text-secondary)', marginTop:'4px'}}>Store #{qrStoreInput} Ready</div>}
+                  </div>
+               </div>
+            </div>
+            </>
           )}
 
+          {/* Report List */}
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'16px'}}>
             {filteredReports.map(r => (
               <div key={r.id} className="card" style={{margin:0, padding:'18px'}}>
