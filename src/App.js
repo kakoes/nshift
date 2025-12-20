@@ -268,7 +268,7 @@ const logout = async () => {
       <div className="header">
         <div className="brand">
           <ClipboardCheck />
-          <span className="store">Store</span>
+          <span className="store">Night Shift</span>
           <span className="checklist">Checklist</span>
         </div>
 
