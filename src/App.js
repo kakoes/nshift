@@ -268,8 +268,8 @@ const logout = async () => {
       <div className="header">
         <div className="brand">
           <ClipboardCheck />
-          <span className="store">Night Shift</span>
-          <span className="checklist">Checklist</span>
+          <span className="store">NightShift</span>
+          <span className="checklist">Duties</span>
         </div>
 
         <div className="nav-group header-nav">
