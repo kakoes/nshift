@@ -12,7 +12,10 @@ import {
   ShieldCheck,
   Search,
   RotateCcw,
-  Filter
+  Filter,
+  Users,
+  PlusCircle,
+  ListChecks
 } from "lucide-react";
 
 import { initializeApp } from "firebase/app";
@@ -52,7 +55,7 @@ const db = getFirestore(app);
 
 /* ================= CONSTANTS ================= */
 
-const QUESTIONS = [
+const DEFAULT_QUESTIONS = [
   "Sweep and Mop Floor (Sales Floor + Behind Register Area) including corners",
   "Clean Restrooms (Men and Women)",
   "Scan Lottery",
@@ -188,7 +191,6 @@ const CustomStyles = () => (
 
     .input-field:focus { border-color: var(--accent-blue); }
 
-    /* FILTERS GRID */
     .filter-bar {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -252,7 +254,8 @@ export default function App() {
   // Form State
   const [name, setName] = useState("");
   const [store, setStore] = useState("");
-  const [answers, setAnswers] = useState(Object.fromEntries(QUESTIONS.map(q => [q, null])));
+  const [dynamicQuestions, setDynamicQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
   const [submitStatus, setSubmitStatus] = useState("idle");
 
   // Admin Login State
@@ -262,6 +265,7 @@ export default function App() {
 
   // Reports State
   const [reports, setReports] = useState([]);
+  const [allAdmins, setAllAdmins] = useState([]);
   
   // FILTERING STATES
   const [filterStore, setFilterStore] = useState("");
@@ -275,6 +279,77 @@ export default function App() {
   const [newAdminPass, setNewAdminPass] = useState("");
   const [newAdminRole, setNewAdminRole] = useState("viewer");
   const [createAdminStatus, setCreateAdminStatus] = useState("");
+  const [newQuestionText, setNewQuestionText] = useState("");
+
+  /* ================= PDF LOGIC ================= */
+
+  // Load scripts once on mount
+  useEffect(() => {
+    const s1 = document.createElement("script");
+    s1.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s1.async = true;
+    const s2 = document.createElement("script");
+    s2.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js";
+    s2.async = true;
+    document.head.appendChild(s1);
+    document.head.appendChild(s2);
+  }, []);
+
+  const downloadPDF = (report) => {
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      alert("PDF libraries are still loading. Please wait a second.");
+      return;
+    }
+
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      const dateStr = report.createdAt?.toDate ? report.createdAt.toDate().toLocaleString() : new Date().toLocaleString();
+
+      // Styling and Header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.setTextColor(255, 159, 28); // Orange
+      doc.text("CIRCLE K", 105, 20, { align: "center" });
+      
+      doc.setFontSize(16);
+      doc.setTextColor(76, 201, 240); // Blue
+      doc.text("NightShift Duties Checklist", 105, 30, { align: "center" });
+
+      // Summary Info
+      doc.setFontSize(10);
+      doc.setTextColor(40, 40, 40);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Store Number: ${report.store}`, 20, 45);
+      doc.text(`Inspector: ${report.name}`, 20, 52);
+      doc.text(`Date/Time: ${dateStr}`, 20, 59);
+      doc.text(`Score: ${report.yesCount} / ${report.totalQuestions}`, 20, 66);
+
+      // Prepare Table Data
+      const tableRows = Object.entries(report.answers).map(([q, a]) => [q, a || "Not Answered"]);
+
+      // Use autoTable - calling it through the doc directly or plugin
+      doc.autoTable({
+        startY: 75,
+        head: [['Task Description', 'Status']],
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [27, 38, 59], textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: 140 },
+          1: { cellWidth: 30, halign: 'center' }
+        }
+      });
+
+      doc.save(`CircleK_Report_Store${report.store}_${report.name.replace(/\s+/g, '_')}.pdf`);
+    } catch (err) {
+      console.error("PDF Error:", err);
+      alert("Failed to generate PDF. Check console for details.");
+    }
+  };
 
   /* ================= AUTH ================= */
 
@@ -304,14 +379,40 @@ export default function App() {
   /* ================= DATA ================= */
 
   useEffect(() => {
+    const unsub = onSnapshot(collection(db, "checklist_questions"), snap => {
+      if (snap.empty) {
+        setDynamicQuestions(DEFAULT_QUESTIONS);
+        setAnswers(Object.fromEntries(DEFAULT_QUESTIONS.map(q => [q, null])));
+      } else {
+        const qList = snap.docs.map(d => d.data().text);
+        setDynamicQuestions(qList);
+        setAnswers(Object.fromEntries(qList.map(q => [q, null])));
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(collection(db, "store_checklists"), snap => {
+    
+    const unsubReports = onSnapshot(collection(db, "store_checklists"), snap => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setReports(data);
     });
-    return () => unsub();
-  }, [user]);
+
+    let unsubAdmins = () => {};
+    if (adminRole === "super") {
+      unsubAdmins = onSnapshot(collection(db, "admins"), snap => {
+        setAllAdmins(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+    }
+
+    return () => {
+      unsubReports();
+      unsubAdmins();
+    };
+  }, [user, adminRole]);
 
   const deleteReport = async (id) => {
     if (adminRole !== 'super') return;
@@ -320,14 +421,21 @@ export default function App() {
     }
   };
 
+  const deleteAdmin = async (id, email) => {
+    if (id === user.uid) { alert("You cannot delete your own account."); return; }
+    if (window.confirm(`Remove ${email} as admin?`)) {
+      await deleteDoc(doc(db, "admins", id));
+    }
+  };
+
   const submitForm = async () => {
     if (!name || !store) { setSubmitStatus("error"); return; }
     setSubmitStatus("submitting");
     const yesCount = Object.values(answers).filter(v => v === "Yes").length;
     await addDoc(collection(db, "store_checklists"), {
-      name, store, answers, yesCount, totalQuestions: QUESTIONS.length, createdAt: serverTimestamp(),
+      name, store, answers, yesCount, totalQuestions: dynamicQuestions.length, createdAt: serverTimestamp(),
     });
-    setName(""); setStore(""); setAnswers(Object.fromEntries(QUESTIONS.map(q => [q, null])));
+    setName(""); setStore(""); setAnswers(Object.fromEntries(dynamicQuestions.map(q => [q, null])));
     setSubmitStatus("success");
     setTimeout(() => setSubmitStatus("idle"), 3000);
   };
@@ -338,9 +446,7 @@ export default function App() {
     try {
       const cred = await createUserWithEmailAndPassword(auth, newAdminEmail, newAdminPass);
       await setDoc(doc(db, "admins", cred.user.uid), {
-        email: newAdminEmail,
-        role: newAdminRole,
-        createdAt: serverTimestamp(),
+        email: newAdminEmail, role: newAdminRole, createdAt: serverTimestamp(),
       });
       setNewAdminEmail(""); setNewAdminPass("");
       setCreateAdminStatus("Admin Created!");
@@ -350,39 +456,41 @@ export default function App() {
     }
   };
 
+  const addQuestion = async () => {
+    if (!newQuestionText) return;
+    await addDoc(collection(db, "checklist_questions"), { text: newQuestionText, createdAt: serverTimestamp() });
+    setNewQuestionText("");
+  };
+
+  const removeQuestion = async (text) => {
+    if (window.confirm(`Delete question: "${text}"?`)) {
+        const unsub = onSnapshot(collection(db, "checklist_questions"), async snap => {
+            const match = snap.docs.find(d => d.data().text === text);
+            if (match) await deleteDoc(doc(db, "checklist_questions", match.id));
+        });
+        unsub();
+    }
+  };
+
   /* ================= FILTER LOGIC ================= */
 
   const filtered = reports.filter(r => {
     const sMatch = filterStore ? r.store?.includes(filterStore) : true;
     const nMatch = filterName ? r.name?.toLowerCase().includes(filterName.toLowerCase()) : true;
-    
     if (!r.createdAt?.toDate) return sMatch && nMatch;
-    
     const rDate = r.createdAt.toDate();
     rDate.setHours(0,0,0,0);
-    
     let dMatch = true;
     if (filterDateStart) {
-      const start = new Date(filterDateStart);
-      start.setHours(0,0,0,0);
+      const start = new Date(filterDateStart); start.setHours(0,0,0,0);
       dMatch = dMatch && rDate >= start;
     }
     if (filterDateEnd) {
-      const end = new Date(filterDateEnd);
-      end.setHours(23,59,59,999);
+      const end = new Date(filterDateEnd); end.setHours(23,59,59,999);
       dMatch = dMatch && rDate <= end;
     }
-    
     return sMatch && nMatch && dMatch;
   });
-
-  const resetFilters = () => {
-    setFilterStore("");
-    setFilterName("");
-    setFilterDateStart("");
-    setFilterDateEnd("");
-    setPage(1);
-  };
 
   const paginated = filtered.slice((page - 1) * REPORTS_PER_PAGE, page * REPORTS_PER_PAGE);
   const totalPages = Math.ceil(filtered.length / REPORTS_PER_PAGE) || 1;
@@ -392,7 +500,6 @@ export default function App() {
   return (
     <div className="app-container">
       <CustomStyles />
-      
       <header className="header">
         <div className="brand">
           <ClipboardCheck color="var(--accent-orange)" />
@@ -419,7 +526,7 @@ export default function App() {
             <input placeholder="Admin Email" className="input-field" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} />
             <input placeholder="Password" type="password" className="input-field" value={adminPass} onChange={e => setAdminPass(e.target.value)} />
             <button className="nav-btn primary" style={{justifyContent: 'center'}} onClick={loginAdmin}>Login</button>
-            {adminError && <p className="status error">{adminError}</p>}
+            {adminError && <p style={{color: 'var(--danger)', fontSize: '0.8rem'}}>{adminError}</p>}
           </div>
         </div>
       )}
@@ -436,100 +543,98 @@ export default function App() {
               <input className="input-field" value={store} onChange={e => setStore(e.target.value)} placeholder="Store #" />
             </div>
           </div>
-          {QUESTIONS.map((q, i) => (
-            <div key={i} className="question-item">
-              <div style={{color: '#ffc99c', marginBottom: '10px', fontSize: '0.95rem'}}>{q}</div>
-              <div style={{display: 'flex', gap: '10px'}}>
-                {["Yes", "No", "N/A"].map(o => (
-                  <button key={o} onClick={() => setAnswers({...answers, [q]: o})} className={`opt-btn ${answers[q] === o ? (o === 'Yes' ? 'active-yes' : o === 'No' ? 'active-no' : 'active-na') : ''}`}>{o}</button>
-                ))}
-              </div>
-            </div>
-          ))}
+          {dynamicQuestions.length === 0 ? (
+            <div style={{textAlign: 'center', padding: '40px', color: 'var(--text-secondary)'}}>No checklist questions found.</div>
+          ) : (
+            dynamicQuestions.map((q, i) => (
+                <div key={i} className="question-item">
+                  <div style={{color: '#ffc99c', marginBottom: '10px', fontSize: '0.95rem'}}>{q}</div>
+                  <div style={{display: 'flex', gap: '10px'}}>
+                    {["Yes", "No", "N/A"].map(o => (
+                      <button key={o} onClick={() => setAnswers({...answers, [q]: o})} className={`opt-btn ${answers[q] === o ? (o === 'Yes' ? 'active-yes' : o === 'No' ? 'active-no' : 'active-na') : ''}`}>{o}</button>
+                    ))}
+                  </div>
+                </div>
+              ))
+          )}
           <button className="nav-btn primary" style={{width: '100%', marginTop: '20px', padding: '16px'}} onClick={submitForm}>Submit Report</button>
-          {submitStatus === "success" && <p className="status info" style={{color: 'var(--success)', textAlign: 'center'}}>Report Saved!</p>}
-          {submitStatus === "error" && <p className="status error" style={{textAlign: 'center'}}>Name and Store # required.</p>}
+          {submitStatus === "success" && <p style={{color: 'var(--success)', textAlign: 'center', marginTop: '10px'}}>Report Saved!</p>}
+          {submitStatus === "error" && <p style={{color: 'var(--danger)', textAlign: 'center', marginTop: '10px'}}>Name and Store # required.</p>}
         </div>
       )}
 
       {view === "admin" && user && (
         <div>
-          {/* SUPER ADMIN: ACCOUNT CREATION */}
           {adminRole === "super" && (
-            <div className="card" style={{borderLeft: '4px solid var(--accent-orange)'}}>
-              <h3 style={{color: 'var(--accent-orange)', display: 'flex', alignItems: 'center', gap: '8px'}}><UserPlus size={18} /> Manage Admin Accounts</h3>
-              <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '15px'}}>
-                <input placeholder="Email" className="input-field" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} />
-                <input placeholder="Password" type="password" className="input-field" value={newAdminPass} onChange={e => setNewAdminPass(e.target.value)} />
-                <select className="input-field" value={newAdminRole} onChange={e => setNewAdminRole(e.target.value)}>
-                  <option value="viewer">Viewer (Read Only)</option>
-                  <option value="super">Super Admin (Full Control)</option>
-                </select>
-                <button className="nav-btn success" style={{justifyContent: 'center'}} onClick={createAdminAccount}>Create</button>
+            <div style={{display: 'flex', flexDirection: 'column', gap: '24px'}}>
+              <div className="card" style={{borderLeft: '4px solid var(--accent-orange)'}}>
+                <h3>Manage Admin Accounts</h3>
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '15px'}}>
+                  <input placeholder="New Email" className="input-field" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} />
+                  <input placeholder="New Password" type="password" className="input-field" value={newAdminPass} onChange={e => setNewAdminPass(e.target.value)} />
+                  <select className="input-field" value={newAdminRole} onChange={e => setNewAdminRole(e.target.value)}>
+                    <option value="viewer">Viewer</option>
+                    <option value="super">Super Admin</option>
+                  </select>
+                  <button className="nav-btn success" onClick={createAdminAccount}>Create</button>
+                </div>
+                <div style={{marginTop: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px'}}>
+                    {allAdmins.map(adm => (
+                      <div key={adm.id} style={{background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px'}}>
+                        <div style={{fontSize: '0.8rem'}}>
+                          <div>{adm.email}</div>
+                          <div style={{color: adm.role === 'super' ? 'var(--accent-orange)' : 'var(--accent-blue)'}}>{adm.role.toUpperCase()}</div>
+                        </div>
+                        {adm.id !== user.uid && <button onClick={() => deleteAdmin(adm.id, adm.email)} style={{background: 'none', border: 'none', color: 'var(--danger)'}}><Trash2 size={14}/></button>}
+                      </div>
+                    ))}
+                </div>
               </div>
-              {createAdminStatus && <p className="status info">{createAdminStatus}</p>}
+
+              <div className="card" style={{borderLeft: '4px solid var(--accent-blue)'}}>
+                <h3>Manage Checklist Questions</h3>
+                <div style={{display: 'flex', gap: '12px', marginTop: '15px'}}>
+                    <input placeholder="New task..." className="input-field" value={newQuestionText} onChange={e => setNewQuestionText(e.target.value)} />
+                    <button className="nav-btn primary" onClick={addQuestion}>Add</button>
+                </div>
+                <div style={{marginTop: '20px', maxHeight: '200px', overflowY: 'auto'}}>
+                    {dynamicQuestions.map((q, idx) => (
+                        <div key={idx} style={{display: 'flex', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid rgba(255,255,255,0.05)'}}>
+                            <span style={{fontSize: '0.85rem'}}>{q}</span>
+                            <button onClick={() => removeQuestion(q)} style={{background: 'none', border: 'none', color: 'var(--danger)'}}><Trash2 size={16}/></button>
+                        </div>
+                    ))}
+                </div>
+              </div>
             </div>
           )}
 
-          {/* FILTER BAR FOR ALL ADMINS */}
-          <div className="filter-bar">
-            <div>
-              <label className="input-label"><Search size={12} /> Store #</label>
-              <input className="input-field" placeholder="Search Store..." value={filterStore} onChange={e => setFilterStore(e.target.value)} />
-            </div>
-            <div>
-              <label className="input-label"><Filter size={12} /> Inspector</label>
-              <input className="input-field" placeholder="Search Name..." value={filterName} onChange={e => setFilterName(e.target.value)} />
-            </div>
-            <div>
-              <label className="input-label"><Clock size={12} /> From Date</label>
-              <input type="date" className="input-field" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
-            </div>
-            <div>
-              <label className="input-label"><Clock size={12} /> To Date</label>
-              <input type="date" className="input-field" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
-            </div>
-            <button className="nav-btn danger" style={{height: '46px'}} onClick={resetFilters}><RotateCcw size={16} /> Reset</button>
+          <div className="filter-bar" style={{marginTop: '24px'}}>
+            <input className="input-field" placeholder="Store #" value={filterStore} onChange={e => setFilterStore(e.target.value)} />
+            <input className="input-field" placeholder="Inspector" value={filterName} onChange={e => setFilterName(e.target.value)} />
+            <input type="date" className="input-field" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
+            <input type="date" className="input-field" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
+            <button className="nav-btn danger" onClick={() => { setFilterStore(""); setFilterName(""); setFilterDateStart(""); setFilterDateEnd(""); }}><RotateCcw size={16}/></button>
           </div>
 
-          {/* DASHBOARD GRID */}
           <div className="admin-dashboard-grid">
-            {paginated.map(r => {
-               const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date();
-               return (
+            {paginated.map(r => (
                 <div key={r.id} className="report-box">
                   <div>
                     <h3>Store #{r.store}</h3>
                     <div className="employee-name">{r.name}</div>
-                    <div className="report-time"><Clock size={12} /> {d.toLocaleDateString()}</div>
+                    <div className="report-time"><Clock size={12} /> {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString() : 'Pending'}</div>
                   </div>
-                  
                   <div style={{marginTop: '12px'}}>
-                    <div style={{color: r.yesCount > 20 ? 'var(--success)' : 'var(--accent-orange)', fontSize: '0.8rem', fontWeight: 700}}>
-                      Score: {r.yesCount}/{r.totalQuestions}
-                    </div>
+                    <div style={{color: 'var(--accent-orange)', fontSize: '0.8rem'}}>Score: {r.yesCount}/{r.totalQuestions}</div>
                     <div style={{display: 'flex', gap: '6px', marginTop: '10px', justifyContent: 'flex-end'}}>
-                      <button className="nav-btn" style={{padding: '6px'}} title="Download PDF"><Download size={14}/></button>
-                      {adminRole === "super" && (
-                        <button className="nav-btn" style={{background: 'rgba(255,77,79,0.1)', padding: '6px'}} onClick={() => deleteReport(r.id)}>
-                          <Trash2 size={14} color="var(--danger)" />
-                        </button>
-                      )}
+                      <button className="nav-btn" onClick={() => downloadPDF(r)}><Download size={14}/></button>
+                      {adminRole === "super" && <button className="nav-btn danger" onClick={() => deleteReport(r.id)}><Trash2 size={14}/></button>}
                     </div>
                   </div>
                 </div>
-               )
-            })}
+            ))}
           </div>
-
-          {/* PAGINATION */}
-          {totalPages > 1 && (
-            <div style={{display: 'flex', justifyContent: 'center', gap: '15px', marginTop: '30px', alignItems: 'center'}}>
-              <button className="nav-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-              <span style={{fontWeight: 700, color: 'var(--accent-blue)'}}>{page} / {totalPages}</span>
-              <button className="nav-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
-            </div>
-          )}
         </div>
       )}
     </div>
