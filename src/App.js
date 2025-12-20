@@ -95,7 +95,7 @@ export default function App() {
 
   const [reports, setReports] = useState([]);
   const [activeReport, setActiveReport] = useState(null);
-  const [printPreviewReport, setPrintPreviewReport] = useState(null);
+  const [printPreview, setPrintPreview] = useState(null);
 
   const [submitStatus, setSubmitStatus] = useState("idle");
   const [cooldown, setCooldown] = useState(0);
@@ -132,7 +132,8 @@ export default function App() {
 
   const logout = async () => {
     await signOut(auth);
-    setView("form");
+    setUser(null);
+    setView("admin"); // ✅ FIX: login form reappears
   };
 
   /* ================= FIRESTORE ================= */
@@ -164,14 +165,12 @@ export default function App() {
       return;
     }
 
-    const yesCount = Object.values(answers).filter(v => v === "Yes").length;
+    setSubmitStatus("submitting");
 
     await addDoc(collection(db, "store_checklists"), {
       name,
       store,
       answers,
-      yesCount,
-      totalQuestions: QUESTIONS.length,
       createdAt: serverTimestamp(),
     });
 
@@ -186,7 +185,7 @@ export default function App() {
     await deleteDoc(doc(db, "store_checklists", id));
   };
 
-  /* ================= PDF / PRINT ================= */
+  /* ================= PDF ================= */
 
   const exportPDF = r => {
     const pdf = new jsPDF();
@@ -211,12 +210,12 @@ export default function App() {
     pdf.save(`Store_${r.store}_${d.getTime()}.pdf`);
   };
 
-  const triggerPrint = () => window.print();
-
-  /* ================= FILTER + PAGINATION ================= */
+  /* ================= FILTER ================= */
 
   const filtered = reports.filter(r => {
-    const storeMatch = filterStore ? r.store?.includes(filterStore) : true;
+    const storeMatch = filterStore
+      ? r.store?.includes(filterStore)
+      : true;
     const dateMatch =
       filterDate && r.createdAt?.toDate
         ? r.createdAt.toDate().toISOString().slice(0, 10) === filterDate
@@ -230,7 +229,7 @@ export default function App() {
     page * REPORTS_PER_PAGE
   );
 
-  /* ================= LOADING ================= */
+  /* ================= RENDER ================= */
 
   if (loading) {
     return (
@@ -240,11 +239,9 @@ export default function App() {
     );
   }
 
-  /* ================= RENDER ================= */
-
   return (
     <div className="app-container">
-      {/* HEADER */}
+      {/* ================= HEADER ================= */}
       <div className="header">
         <div className="brand">
           <ClipboardCheck />
@@ -260,31 +257,52 @@ export default function App() {
             <ClipboardCheck size={18} /> Form
           </button>
 
-          {user?.email && (
-            <button
-              className={`nav-btn ${view === "admin" ? "active" : ""}`}
-              onClick={() => setView("admin")}
-            >
-              <LayoutDashboard size={18} /> Admin
-            </button>
-          )}
+          <button
+            className={`nav-btn ${view === "admin" ? "active" : ""}`}
+            onClick={() => setView("admin")}
+          >
+            <LayoutDashboard size={18} /> Admin
+          </button>
 
-          {user?.email ? (
+          {user?.email && (
             <button className="nav-btn" onClick={logout}>
               <LogOut size={18} /> Logout
-            </button>
-          ) : (
-            <button className="nav-btn" onClick={() => setView("admin")}>
-              <LogIn size={18} /> Admin Login
             </button>
           )}
         </div>
       </div>
 
-      {/* FORM */}
+      {/* ================= ADMIN LOGIN ================= */}
+      {view === "admin" && !user && (
+        <div className="card">
+          <h2>Admin Login</h2>
+          <input
+            className="input-field"
+            placeholder="Email"
+            value={adminEmail}
+            onChange={e => setAdminEmail(e.target.value)}
+          />
+          <input
+            type="password"
+            className="input-field"
+            placeholder="Password"
+            value={adminPass}
+            onChange={e => setAdminPass(e.target.value)}
+          />
+          <button className="nav-btn primary" onClick={loginAdmin}>
+            Login
+          </button>
+          {adminError && <div className="status error">{adminError}</div>}
+        </div>
+      )}
+
+      {/* ================= FORM ================= */}
       {view === "form" && (
         <div className="card">
-          <div className="form-grid">
+          <div
+            className="form-grid"
+            style={{ gridTemplateColumns: "1fr", gap: 12 }} // ✅ mobile-first fix
+          >
             <div className="input-wrapper">
               <label className="input-label">Name</label>
               <input
@@ -300,7 +318,9 @@ export default function App() {
                 className="input-field"
                 maxLength={7}
                 value={store}
-                onChange={e => setStore(e.target.value.replace(/\D/g, ""))}
+                onChange={e =>
+                  setStore(e.target.value.replace(/\D/g, ""))
+                }
               />
             </div>
           </div>
@@ -313,13 +333,7 @@ export default function App() {
                   <button
                     key={opt}
                     className={`opt-btn ${
-                      answers[q] === opt
-                        ? opt === "Yes"
-                          ? "active-yes"
-                          : opt === "No"
-                          ? "active-no"
-                          : "active-na"
-                        : ""
+                      answers[q] === opt ? "active-yes" : ""
                     }`}
                     onClick={() =>
                       setAnswers({ ...answers, [q]: opt })
@@ -332,19 +346,26 @@ export default function App() {
             </div>
           ))}
 
-          {cooldown === 0 && (
+          {cooldown === 0 ? (
             <button className="nav-btn success" onClick={submitForm}>
               Submit Checklist
             </button>
+          ) : (
+            <div className="status info">
+              You can submit again in {cooldown}s
+            </div>
           )}
         </div>
       )}
 
-      {/* ADMIN */}
-      {view === "admin" && user?.email && (
+      {/* ================= ADMIN ================= */}
+      {view === "admin" && user && (
         <>
           <div className="card">
-            <div className="form-grid">
+            <div
+              className="form-grid"
+              style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}
+            >
               <div className="input-wrapper">
                 <label className="input-label">Filter Store</label>
                 <input
@@ -368,7 +389,10 @@ export default function App() {
 
           <div className="admin-dashboard seven-col">
             {paginated.map(r => {
-              const d = r.createdAt?.toDate ? r.createdAt.toDate() : null;
+              const d = r.createdAt?.toDate
+                ? r.createdAt.toDate()
+                : null;
+
               return (
                 <div
                   key={r.id}
@@ -379,7 +403,9 @@ export default function App() {
                   <p>{r.name}</p>
                   {d && (
                     <p className="report-time">
-                      <Clock size={12} /> {d.toLocaleString()}
+                      <Clock size={12} />{" "}
+                      {d.toLocaleDateString()}{" "}
+                      {d.toLocaleTimeString()}
                     </p>
                   )}
                 </div>
@@ -389,29 +415,40 @@ export default function App() {
         </>
       )}
 
-      {/* REPORT MODAL */}
+      {/* ================= REPORT MODAL ================= */}
       {activeReport && (
         <div className="modal-overlay">
           <div className="modal-card">
-            <button className="modal-close" onClick={() => setActiveReport(null)}>
+            <button
+              className="modal-close"
+              onClick={() => setActiveReport(null)}
+            >
               <X />
             </button>
 
             <h2>Store #{activeReport.store}</h2>
             <p>{activeReport.name}</p>
 
-            <div className="nav-group">
-              <button className="nav-btn" onClick={() => exportPDF(activeReport)}>
-                <Download size={16} />
-              </button>
+            {Object.entries(activeReport.answers).map(([q, a]) => (
+              <div key={q} className="print-row">
+                <span>{q}</span>
+                <strong>{a}</strong>
+              </div>
+            ))}
 
+            <div className="nav-group">
               <button
                 className="nav-btn"
-                onClick={() => setPrintPreviewReport(activeReport)}
+                onClick={() => exportPDF(activeReport)}
+              >
+                <Download size={16} />
+              </button>
+              <button
+                className="nav-btn"
+                onClick={() => setPrintPreview(activeReport)}
               >
                 <Printer size={16} />
               </button>
-
               <button
                 className="nav-btn"
                 onClick={() => deleteReport(activeReport.id)}
@@ -423,33 +460,36 @@ export default function App() {
         </div>
       )}
 
-      {/* PRINT PREVIEW */}
-      {printPreviewReport && (
+      {/* ================= PRINT PREVIEW ================= */}
+      {printPreview && (
         <div className="modal-overlay print-preview">
           <div className="modal-card print-card">
             <button
-              className="modal-close"
-              onClick={() => setPrintPreviewReport(null)}
+              className="modal-close no-print"
+              onClick={() => setPrintPreview(null)}
             >
               <X />
             </button>
 
             <h2>Circle K Store Checklist</h2>
-            <p><strong>Store:</strong> {printPreviewReport.store}</p>
-            <p><strong>Inspector:</strong> {printPreviewReport.name}</p>
+            <p>Store: {printPreview.store}</p>
+            <p>Inspector: {printPreview.name}</p>
 
-            <div className="print-answers">
-              {Object.entries(printPreviewReport.answers).map(([q, a]) => (
-                <div key={q} className="print-row">
-                  <span>{q}</span>
-                  <span>{a}</span>
-                </div>
-              ))}
+            {Object.entries(printPreview.answers).map(([q, a]) => (
+              <div key={q} className="print-row">
+                <span>{q}</span>
+                <strong>{a}</strong>
+              </div>
+            ))}
+
+            <div className="nav-group no-print">
+              <button
+                className="nav-btn primary"
+                onClick={() => window.print()}
+              >
+                Print
+              </button>
             </div>
-
-            <button className="nav-btn primary" onClick={triggerPrint}>
-              Open Print Preview
-            </button>
           </div>
         </div>
       )}
