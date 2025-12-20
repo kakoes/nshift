@@ -28,6 +28,9 @@ import {
   enableIndexedDbPersistence,
 } from "firebase/firestore";
 
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
 import "./App.css";
 
 /* ================= FIREBASE ================= */
@@ -107,13 +110,20 @@ export default function App() {
 
   /* ================= AUTH ================= */
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, u => {
-      setUser(u);
-      if (u?.email) setView("admin");
-      setLoading(false);
-    });
-  }, []);
+useEffect(() => {
+  return onAuthStateChanged(auth, u => {
+    setUser(u);
+
+    if (u?.email) {
+      setView("admin");
+    } else {
+      setView("form");
+    }
+
+    setLoading(false);
+  });
+}, []);
+
 
   const loginAdmin = async () => {
     try {
@@ -126,10 +136,11 @@ export default function App() {
     }
   };
 
-  const logout = async () => {
-    await signOut(auth);
-    setView("form");
-  };
+const logout = async () => {
+  await signOut(auth);
+};
+
+
 
   /* ================= FIRESTORE ================= */
 
@@ -194,6 +205,31 @@ export default function App() {
     await deleteDoc(doc(db, "store_checklists", id));
   };
 
+  /* ================= PDF ================= */
+
+  const exportPDF = r => {
+    const pdf = new jsPDF();
+    const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date();
+
+    pdf.setFontSize(16);
+    pdf.text("Circle K Store Checklist Report", 14, 18);
+
+    pdf.setFontSize(10);
+    pdf.text(`Store #: ${r.store}`, 14, 28);
+    pdf.text(`Inspector: ${r.name}`, 14, 34);
+    pdf.text(`Date: ${d.toLocaleDateString()}`, 14, 40);
+    pdf.text(`Time: ${d.toLocaleTimeString()}`, 14, 46);
+
+    autoTable(pdf, {
+      startY: 54,
+      head: [["Checklist Item", "Answer"]],
+      body: Object.entries(r.answers),
+      styles: { fontSize: 8 },
+    });
+
+    pdf.save(`Store_${r.store}_${d.getTime()}.pdf`);
+  };
+
   /* ================= FILTER + PAGINATION ================= */
 
   const filtered = reports.filter(r => {
@@ -236,7 +272,6 @@ export default function App() {
           <span className="checklist">Checklist</span>
         </div>
 
-        {/* BUTTONS MOVED UNDER TITLE */}
         <div className="nav-group header-nav">
           <button
             className={`nav-btn ${view === "form" ? "active" : ""}`}
@@ -259,122 +294,145 @@ export default function App() {
               <LogOut size={18} /> Logout
             </button>
           ) : (
-            <button className="nav-btn" onClick={() => setView("admin")}>
-              <LogIn size={18} /> Admin Login
-            </button>
+           <button
+  className="nav-btn"
+  onClick={() => {
+    setView("admin");
+  }}
+>
+  <LogIn size={18} /> Admin Login
+</button>
+
           )}
         </div>
       </div>
 
-      {/* ADMIN LOGIN */}
-      {view === "admin" && !user?.email && (
-        <div className="card">
-          <h2>Admin Login</h2>
 
-          <div className="form-grid">
-            <div className="input-wrapper">
-              <label className="input-label">Email</label>
-              <input
-                className="input-field"
-                value={adminEmail}
-                onChange={e => setAdminEmail(e.target.value)}
-              />
-            </div>
 
-            <div className="input-wrapper">
-              <label className="input-label">Password</label>
-              <input
-                type="password"
-                className="input-field"
-                value={adminPass}
-                onChange={e => setAdminPass(e.target.value)}
-              />
-            </div>
-          </div>
 
-          <button className="nav-btn primary" onClick={loginAdmin}>
-            Login
-          </button>
 
-          {adminError && <div className="status error">{adminError}</div>}
-        </div>
-      )}
+{/* ADMIN LOGIN */}
+{view === "admin" && !user?.email && (
+  <div className="card">
+    <h2>Admin Login</h2>
 
-      {/* FORM */}
-      {view === "form" && (
-        <div className="card">
-          <div className="form-grid">
-            <div className="input-wrapper">
-              <label className="input-label">Name</label>
-              <input
-                className="input-field"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </div>
+    <div className="form-grid">
+      <div className="input-wrapper">
+        <label className="input-label">Email</label>
+        <input
+          className="input-field"
+          value={adminEmail}
+          onChange={e => setAdminEmail(e.target.value)}
+        />
+      </div>
 
-            <div className="input-wrapper">
-              <label className="input-label">Store #</label>
-              <input
-                className="input-field"
-                maxLength={7}
-                value={store}
-                onChange={e => setStore(e.target.value.replace(/\D/g, ""))}
-              />
-            </div>
-          </div>
+      <div className="input-wrapper">
+        <label className="input-label">Password</label>
+        <input
+          type="password"
+          className="input-field"
+          value={adminPass}
+          onChange={e => setAdminPass(e.target.value)}
+        />
+      </div>
+    </div>
 
-          {QUESTIONS.map(q => (
-            <div key={q} className="question-item">
-              <div className="question-text">{q}</div>
-              <div className="options">
-                {["Yes", "No", "N/A"].map(opt => (
-                  <button
-                    key={opt}
-                    className={`opt-btn ${
-                      answers[q] === opt
-                        ? opt === "Yes"
-                          ? "active-yes"
-                          : opt === "No"
-                          ? "active-no"
-                          : "active-na"
-                        : ""
-                    }`}
-                    onClick={() =>
-                      setAnswers({ ...answers, [q]: opt })
-                    }
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+    <button className="nav-btn primary" onClick={loginAdmin}>
+      Login
+    </button>
 
-          {cooldown === 0 && (
-            <button className="nav-btn success" onClick={submitForm}>
-              Submit Checklist
+    {adminError && (
+      <div className="status error">{adminError}</div>
+    )}
+  </div>
+)}
+
+
+
+
+
+
+
+{/* FORM */}
+{view === "form" && (
+  <div className="card">
+    <div className="form-grid">
+      <div className="input-wrapper">
+        <label className="input-label">Name</label>
+        <input
+          className="input-field"
+          value={name}
+          onChange={e => setName(e.target.value)}
+        />
+      </div>
+
+      <div className="input-wrapper">
+        <label className="input-label">Store #</label>
+        <input
+          className="input-field"
+          maxLength={7}
+          value={store}
+          onChange={e =>
+            setStore(e.target.value.replace(/\D/g, ""))
+          }
+        />
+      </div>
+    </div>
+
+    {QUESTIONS.map(q => (
+      <div key={q} className="question-item">
+        <div className="question-text">{q}</div>
+        <div className="options">
+          {["Yes", "No", "N/A"].map(opt => (
+            <button
+              key={opt}
+              className={`opt-btn ${
+                answers[q] === opt
+                  ? opt === "Yes"
+                    ? "active-yes"
+                    : opt === "No"
+                    ? "active-no"
+                    : "active-na"
+                  : ""
+              }`}
+              onClick={() =>
+                setAnswers({ ...answers, [q]: opt })
+              }
+            >
+              {opt}
             </button>
-          )}
-
-          {cooldown > 0 && (
-            <div className="status info">
-              You can submit again in {cooldown}s
-            </div>
-          )}
-
-          {submitStatus === "error" && (
-            <div className="status error">
-              Name and 7-digit store required
-            </div>
-          )}
+          ))}
         </div>
-      )}
+      </div>
+    ))}
+
+    {cooldown === 0 && (
+      <button className="nav-btn success" onClick={submitForm}>
+        Submit Checklist
+      </button>
+    )}
+
+    {cooldown > 0 && (
+      <div className="status info">
+        You can submit again in {cooldown}s
+      </div>
+    )}
+
+    {submitStatus === "error" && (
+      <div className="status error">
+        Name and 7-digit store required
+      </div>
+    )}
+  </div>
+)}
+
+
+
+
 
       {/* ADMIN */}
       {view === "admin" && user?.email && (
         <>
-          {/* FILTERS RESTORED */}
           <div className="card">
             <div className="form-grid">
               <div className="input-wrapper">
@@ -418,6 +476,13 @@ export default function App() {
                   )}
 
                   <div className="nav-group">
+                    <button
+                      className="nav-btn"
+                      onClick={() => exportPDF(r)}
+                    >
+                      <Download size={14} />
+                    </button>
+
                     <button
                       className="nav-btn"
                       onClick={() => deleteReport(r.id)}
