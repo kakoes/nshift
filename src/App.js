@@ -503,7 +503,7 @@ export default function App() {
       <header className="header">
         <div className="brand">
           <ClipboardCheck color="var(--accent-orange)" />
-          <span className="store">CIRCLE K</span>
+          <span className="store">CK</span>
           <span className="checklist">NightShift</span>
         </div>
         <div className="nav-group">
