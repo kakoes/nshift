@@ -633,7 +633,7 @@ export default function App() {
     <div className="app-container">
       <CustomStyles />
       <header className="header">
-        <div className="brand"><span className="store">CIRCLE K</span> <span style={{opacity: 0.6}}>CHECKLIST</span></div>
+        <div className="brand"><span className="store">NIGHT SHIFT</span> <span style={{opacity: 0.6}}>CHECKLIST</span></div>
         <div className="nav-group">
           <button className={`nav-btn ${view === "form" ? "active" : ""}`} onClick={() => setView("form")}><ClipboardCheck size={18}/> Audit</button>
           {user ? (
