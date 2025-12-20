@@ -8,6 +8,11 @@ import {
   Download,
   Trash2,
   Clock,
+  UserPlus,
+  ShieldCheck,
+  Search,
+  RotateCcw,
+  Filter
 } from "lucide-react";
 
 import { initializeApp } from "firebase/app";
@@ -16,6 +21,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  createUserWithEmailAndPassword,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -25,13 +31,9 @@ import {
   doc,
   onSnapshot,
   serverTimestamp,
-  enableIndexedDbPersistence,
+  setDoc,
+  getDoc,
 } from "firebase/firestore";
-
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
-
-import "./App.css";
 
 /* ================= FIREBASE ================= */
 
@@ -48,9 +50,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-enableIndexedDbPersistence(db).catch(() => {});
-
-/* ================= QUESTIONS ================= */
+/* ================= CONSTANTS ================= */
 
 const QUESTIONS = [
   "Sweep and Mop Floor (Sales Floor + Behind Register Area) including corners",
@@ -81,442 +81,456 @@ const QUESTIONS = [
 
 const REPORTS_PER_PAGE = 14;
 
+/* ================= STYLES ================= */
+
+const CustomStyles = () => (
+  <style>{`
+    @import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&display=swap");
+
+    :root {
+      --bg: #0d1b2a;
+      --card: #1b263b;
+      --accent-blue: #4cc9f0;
+      --accent-orange: #ff9f1c;
+      --text-primary: #e0e1dd;
+      --text-secondary: #778da9;
+      --success: #00ff9c;
+      --danger: #ff4d4f;
+      --warning: #ffd166;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Josefin Sans", sans-serif;
+      background-color: var(--bg);
+      color: var(--text-primary);
+    }
+
+    .app-container {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 16px;
+      min-height: 100vh;
+    }
+
+    .header {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 24px;
+      background: rgba(27, 38, 59, 0.9);
+      backdrop-filter: blur(12px);
+      padding: 18px 22px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      position: sticky;
+      top: 16px;
+      z-index: 100;
+    }
+
+    .brand {
+      font-size: 1.75rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand .store { color: var(--accent-orange); }
+    .brand .checklist { color: var(--accent-blue); }
+
+    .nav-btn {
+      padding: 10px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(65, 90, 119, 0.35);
+      color: white;
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    .nav-btn.active, .nav-btn.primary { background: var(--accent-blue); color: var(--bg); }
+    .nav-btn.success { background: var(--success); color: var(--bg); }
+    .nav-btn.danger { background: rgba(255,77,79,0.15); color: var(--danger); border-color: var(--danger); }
+
+    .card {
+      background: var(--card);
+      padding: 24px;
+      border-radius: 30px;
+      border: 1px solid rgba(255,255,255,0.05);
+      margin-bottom: 24px;
+    }
+
+    .input-label {
+      font-size: 0.8rem;
+      color: var(--accent-blue);
+      margin-bottom: 6px;
+      font-weight: 600;
+      display: block;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 2px solid rgba(255,255,255,0.1);
+      background: rgba(13, 27, 42, 0.55);
+      color: white;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .input-field:focus { border-color: var(--accent-blue); }
+
+    /* FILTERS GRID */
+    .filter-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 20px;
+      background: rgba(27, 38, 59, 0.5);
+      padding: 16px;
+      border-radius: 20px;
+    }
+
+    .report-box {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .report-box h3 { font-size: 0.9rem; margin: 0; color: var(--accent-orange); }
+    .employee-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary) !important; margin: 4px 0; }
+    .report-time { color: var(--text-secondary) !important; font-size: 0.7rem; display: flex; align-items: center; gap: 4px; }
+
+    .admin-dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px;
+    }
+
+    @media (min-width: 1200px) { .admin-dashboard-grid { grid-template-columns: repeat(7, 1fr); } }
+
+    .question-item {
+      margin-bottom: 12px;
+      background: rgba(13, 27, 42, 0.35);
+      padding: 14px;
+      border-radius: 16px;
+      border-left: 4px solid var(--accent-blue);
+    }
+
+    .opt-btn { flex: 1; padding: 8px; border-radius: 10px; background: var(--bg); border: none; color: white; cursor: pointer; }
+    .opt-btn.active-yes { background: var(--success); color: var(--bg); }
+    .opt-btn.active-no { background: var(--danger); color: white; }
+    .opt-btn.active-na { background: var(--warning); color: var(--bg); }
+
+    .loader-screen { height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .animate-spin { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  `}</style>
+);
+
 /* ================= APP ================= */
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [adminRole, setAdminRole] = useState(null);
   const [view, setView] = useState("form");
   const [loading, setLoading] = useState(true);
 
+  // Form State
   const [name, setName] = useState("");
   const [store, setStore] = useState("");
-  const [answers, setAnswers] = useState(
-    Object.fromEntries(QUESTIONS.map(q => [q, null]))
-  );
-
-  const [reports, setReports] = useState([]);
-
+  const [answers, setAnswers] = useState(Object.fromEntries(QUESTIONS.map(q => [q, null])));
   const [submitStatus, setSubmitStatus] = useState("idle");
-  const [cooldown, setCooldown] = useState(0);
 
+  // Admin Login State
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [adminError, setAdminError] = useState("");
 
+  // Reports State
+  const [reports, setReports] = useState([]);
+  
+  // FILTERING STATES
   const [filterStore, setFilterStore] = useState("");
-  const [filterDate, setFilterDate] = useState("");
-
+  const [filterName, setFilterName] = useState("");
+  const [filterDateStart, setFilterDateStart] = useState("");
+  const [filterDateEnd, setFilterDateEnd] = useState("");
   const [page, setPage] = useState(1);
+
+  // Super Admin State
+  const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newAdminPass, setNewAdminPass] = useState("");
+  const [newAdminRole, setNewAdminRole] = useState("viewer");
+  const [createAdminStatus, setCreateAdminStatus] = useState("");
 
   /* ================= AUTH ================= */
 
-useEffect(() => {
-  return onAuthStateChanged(auth, u => {
-    setUser(u);
-
-    if (u?.email) {
-      setView("admin");
-    } else {
-      setView("form");
-    }
-
-    setLoading(false);
-  });
-}, []);
-
+  useEffect(() => {
+    return onAuthStateChanged(auth, async u => {
+      setUser(u);
+      if (u) {
+        const snap = await getDoc(doc(db, "admins", u.uid));
+        setAdminRole(snap.exists() ? snap.data().role : "super");
+      } else {
+        setAdminRole(null);
+      }
+      setLoading(false);
+    });
+  }, []);
 
   const loginAdmin = async () => {
     try {
       setAdminError("");
       await signInWithEmailAndPassword(auth, adminEmail, adminPass);
-      setAdminEmail("");
-      setAdminPass("");
-    } catch {
-      setAdminError("Invalid admin credentials");
+      setView("admin");
+    } catch (err) {
+      setAdminError("Invalid Login");
     }
   };
 
-const logout = async () => {
-  await signOut(auth);
-};
-
-
-
-  /* ================= FIRESTORE ================= */
+  /* ================= DATA ================= */
 
   useEffect(() => {
-    if (view !== "admin") return;
-
+    if (!user) return;
     const unsub = onSnapshot(collection(db, "store_checklists"), snap => {
-      const data = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-      }));
-
-      data.sort(
-        (a, b) =>
-          (b.createdAt?.seconds || 0) -
-          (a.createdAt?.seconds || 0)
-      );
-
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setReports(data);
     });
-
     return () => unsub();
-  }, [view]);
+  }, [user]);
 
-  /* ================= SUBMIT ================= */
-
-  useEffect(() => {
-    if (cooldown === 0) return;
-    const t = setInterval(() => {
-      setCooldown(c => c - 1);
-    }, 1000);
-    return () => clearInterval(t);
-  }, [cooldown]);
+  const deleteReport = async (id) => {
+    if (adminRole !== 'super') return;
+    if (window.confirm("Delete this report?")) {
+      await deleteDoc(doc(db, "store_checklists", id));
+    }
+  };
 
   const submitForm = async () => {
-    if (!name || store.length !== 7) {
-      setSubmitStatus("error");
-      return;
-    }
-
+    if (!name || !store) { setSubmitStatus("error"); return; }
     setSubmitStatus("submitting");
-
     const yesCount = Object.values(answers).filter(v => v === "Yes").length;
-
     await addDoc(collection(db, "store_checklists"), {
-      name,
-      store,
-      answers,
-      yesCount,
-      totalQuestions: QUESTIONS.length,
-      createdAt: serverTimestamp(),
+      name, store, answers, yesCount, totalQuestions: QUESTIONS.length, createdAt: serverTimestamp(),
     });
-
-    setName("");
-    setStore("");
-    setAnswers(Object.fromEntries(QUESTIONS.map(q => [q, null])));
+    setName(""); setStore(""); setAnswers(Object.fromEntries(QUESTIONS.map(q => [q, null])));
     setSubmitStatus("success");
-    setCooldown(10);
+    setTimeout(() => setSubmitStatus("idle"), 3000);
   };
 
-  const deleteReport = async id => {
-    await deleteDoc(doc(db, "store_checklists", id));
+  const createAdminAccount = async () => {
+    if (!newAdminEmail || !newAdminPass) return;
+    setCreateAdminStatus("Creating...");
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, newAdminEmail, newAdminPass);
+      await setDoc(doc(db, "admins", cred.user.uid), {
+        email: newAdminEmail,
+        role: newAdminRole,
+        createdAt: serverTimestamp(),
+      });
+      setNewAdminEmail(""); setNewAdminPass("");
+      setCreateAdminStatus("Admin Created!");
+      setTimeout(() => setCreateAdminStatus(""), 3000);
+    } catch (err) {
+      setCreateAdminStatus("Error: " + err.message);
+    }
   };
 
-  /* ================= PDF ================= */
-
-  const exportPDF = r => {
-    const pdf = new jsPDF();
-    const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date();
-
-    pdf.setFontSize(16);
-    pdf.text("Circle K Store Checklist Report", 14, 18);
-
-    pdf.setFontSize(10);
-    pdf.text(`Store #: ${r.store}`, 14, 28);
-    pdf.text(`Inspector: ${r.name}`, 14, 34);
-    pdf.text(`Date: ${d.toLocaleDateString()}`, 14, 40);
-    pdf.text(`Time: ${d.toLocaleTimeString()}`, 14, 46);
-
-    autoTable(pdf, {
-      startY: 54,
-      head: [["Checklist Item", "Answer"]],
-      body: Object.entries(r.answers),
-      styles: { fontSize: 8 },
-    });
-
-    pdf.save(`Store_${r.store}_${d.getTime()}.pdf`);
-  };
-
-  /* ================= FILTER + PAGINATION ================= */
+  /* ================= FILTER LOGIC ================= */
 
   const filtered = reports.filter(r => {
-    const storeMatch = filterStore
-      ? r.store?.includes(filterStore)
-      : true;
-
-    const dateMatch =
-      filterDate && r.createdAt?.toDate
-        ? r.createdAt.toDate().toISOString().slice(0, 10) === filterDate
-        : true;
-
-    return storeMatch && dateMatch;
+    const sMatch = filterStore ? r.store?.includes(filterStore) : true;
+    const nMatch = filterName ? r.name?.toLowerCase().includes(filterName.toLowerCase()) : true;
+    
+    if (!r.createdAt?.toDate) return sMatch && nMatch;
+    
+    const rDate = r.createdAt.toDate();
+    rDate.setHours(0,0,0,0);
+    
+    let dMatch = true;
+    if (filterDateStart) {
+      const start = new Date(filterDateStart);
+      start.setHours(0,0,0,0);
+      dMatch = dMatch && rDate >= start;
+    }
+    if (filterDateEnd) {
+      const end = new Date(filterDateEnd);
+      end.setHours(23,59,59,999);
+      dMatch = dMatch && rDate <= end;
+    }
+    
+    return sMatch && nMatch && dMatch;
   });
 
-  const totalPages = Math.ceil(filtered.length / REPORTS_PER_PAGE);
+  const resetFilters = () => {
+    setFilterStore("");
+    setFilterName("");
+    setFilterDateStart("");
+    setFilterDateEnd("");
+    setPage(1);
+  };
 
-  const paginated = filtered.slice(
-    (page - 1) * REPORTS_PER_PAGE,
-    page * REPORTS_PER_PAGE
-  );
+  const paginated = filtered.slice((page - 1) * REPORTS_PER_PAGE, page * REPORTS_PER_PAGE);
+  const totalPages = Math.ceil(filtered.length / REPORTS_PER_PAGE) || 1;
 
-  /* ================= RENDER ================= */
-
-  if (loading) {
-    return (
-      <div className="loader-screen">
-        <Loader2 className="animate-spin" size={40} />
-      </div>
-    );
-  }
+  if (loading) return <div className="loader-screen"><CustomStyles /><Loader2 className="animate-spin" color="#4cc9f0" size={64} /></div>;
 
   return (
     <div className="app-container">
-      {/* HEADER */}
-      <div className="header">
+      <CustomStyles />
+      
+      <header className="header">
         <div className="brand">
-          <ClipboardCheck />
-          <span className="store">NightShift</span>
-          <span className="checklist">Duties</span>
+          <ClipboardCheck color="var(--accent-orange)" />
+          <span className="store">CIRCLE K</span>
+          <span className="checklist">NightShift</span>
         </div>
-
-        <div className="nav-group header-nav">
-          <button
-            className={`nav-btn ${view === "form" ? "active" : ""}`}
-            onClick={() => setView("form")}
-          >
-            <ClipboardCheck size={18} /> Form
-          </button>
-
-          {user?.email && (
-            <button
-              className={`nav-btn ${view === "admin" ? "active" : ""}`}
-              onClick={() => setView("admin")}
-            >
-              <LayoutDashboard size={18} /> Admin
-            </button>
-          )}
-
-          {user?.email ? (
-            <button className="nav-btn" onClick={logout}>
-              <LogOut size={18} /> Logout
-            </button>
+        <div className="nav-group">
+          <button className={`nav-btn ${view === "form" ? "active" : ""}`} onClick={() => setView("form")}><ClipboardCheck size={20} /> New Form</button>
+          {user ? (
+            <>
+              <button className={`nav-btn ${view === "admin" ? "active" : ""}`} onClick={() => setView("admin")}><LayoutDashboard size={20} /> Dashboard</button>
+              <button className="nav-btn" onClick={() => { signOut(auth); setView("form"); }}><LogOut size={20} /> Logout</button>
+            </>
           ) : (
-           <button
-  className="nav-btn"
-  onClick={() => {
-    setView("admin");
-  }}
->
-  <LogIn size={18} /> Admin Login
-</button>
-
+            <button className={`nav-btn ${view === "login" ? "active" : ""}`} onClick={() => setView("login")}><LogIn size={20} /> Admin</button>
           )}
         </div>
-      </div>
+      </header>
 
-
-
-
-
-{/* ADMIN LOGIN */}
-{view === "admin" && !user?.email && (
-  <div className="card">
-    <h2>Admin Login</h2>
-
-    <div className="form-grid">
-      <div className="input-wrapper">
-        <label className="input-label">Email</label>
-        <input
-          className="input-field"
-          value={adminEmail}
-          onChange={e => setAdminEmail(e.target.value)}
-        />
-      </div>
-
-      <div className="input-wrapper">
-        <label className="input-label">Password</label>
-        <input
-          type="password"
-          className="input-field"
-          value={adminPass}
-          onChange={e => setAdminPass(e.target.value)}
-        />
-      </div>
-    </div>
-
-    <button className="nav-btn primary" onClick={loginAdmin}>
-      Login
-    </button>
-
-    {adminError && (
-      <div className="status error">{adminError}</div>
-    )}
-  </div>
-)}
-
-
-
-
-
-
-
-{/* FORM */}
-{view === "form" && (
-  <div className="card">
-    <div className="form-grid">
-      <div className="input-wrapper">
-        <label className="input-label">Name</label>
-        <input
-          className="input-field"
-          value={name}
-          onChange={e => setName(e.target.value)}
-        />
-      </div>
-
-      <div className="input-wrapper">
-        <label className="input-label">Store #</label>
-        <input
-          className="input-field"
-          maxLength={7}
-          value={store}
-          onChange={e =>
-            setStore(e.target.value.replace(/\D/g, ""))
-          }
-        />
-      </div>
-    </div>
-
-    {QUESTIONS.map(q => (
-      <div key={q} className="question-item">
-        <div className="question-text">{q}</div>
-        <div className="options">
-          {["Yes", "No", "N/A"].map(opt => (
-            <button
-              key={opt}
-              className={`opt-btn ${
-                answers[q] === opt
-                  ? opt === "Yes"
-                    ? "active-yes"
-                    : opt === "No"
-                    ? "active-no"
-                    : "active-na"
-                  : ""
-              }`}
-              onClick={() =>
-                setAnswers({ ...answers, [q]: opt })
-              }
-            >
-              {opt}
-            </button>
-          ))}
+      {view === "login" && (
+        <div className="card" style={{maxWidth: '400px', margin: '40px auto'}}>
+          <h2 style={{color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: '10px'}}><ShieldCheck /> Admin Access</h2>
+          <div style={{display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px'}}>
+            <input placeholder="Admin Email" className="input-field" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} />
+            <input placeholder="Password" type="password" className="input-field" value={adminPass} onChange={e => setAdminPass(e.target.value)} />
+            <button className="nav-btn primary" style={{justifyContent: 'center'}} onClick={loginAdmin}>Login</button>
+            {adminError && <p className="status error">{adminError}</p>}
+          </div>
         </div>
-      </div>
-    ))}
+      )}
 
-    {cooldown === 0 && (
-      <button className="nav-btn success" onClick={submitForm}>
-        Submit Checklist
-      </button>
-    )}
-
-    {cooldown > 0 && (
-      <div className="status info">
-        You can submit again in {cooldown}s
-      </div>
-    )}
-
-    {submitStatus === "error" && (
-      <div className="status error">
-        Name and 7-digit store required
-      </div>
-    )}
-  </div>
-)}
-
-
-
-
-
-      {/* ADMIN */}
-      {view === "admin" && user?.email && (
-        <>
-          <div className="card">
-            <div className="form-grid">
-              <div className="input-wrapper">
-                <label className="input-label">Filter Store</label>
-                <input
-                  className="input-field"
-                  value={filterStore}
-                  onChange={e => setFilterStore(e.target.value)}
-                />
-              </div>
-
-              <div className="input-wrapper">
-                <label className="input-label">Filter Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={filterDate}
-                  onChange={e => setFilterDate(e.target.value)}
-                />
-              </div>
+      {view === "form" && (
+        <div className="card" style={{maxWidth: '800px', margin: '0 auto'}}>
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '25px'}}>
+            <div>
+              <label className="input-label">Inspector Name</label>
+              <input className="input-field" value={name} onChange={e => setName(e.target.value)} placeholder="Full Name" />
+            </div>
+            <div>
+              <label className="input-label">Store Number</label>
+              <input className="input-field" value={store} onChange={e => setStore(e.target.value)} placeholder="Store #" />
             </div>
           </div>
+          {QUESTIONS.map((q, i) => (
+            <div key={i} className="question-item">
+              <div style={{color: '#ffc99c', marginBottom: '10px', fontSize: '0.95rem'}}>{q}</div>
+              <div style={{display: 'flex', gap: '10px'}}>
+                {["Yes", "No", "N/A"].map(o => (
+                  <button key={o} onClick={() => setAnswers({...answers, [q]: o})} className={`opt-btn ${answers[q] === o ? (o === 'Yes' ? 'active-yes' : o === 'No' ? 'active-no' : 'active-na') : ''}`}>{o}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button className="nav-btn primary" style={{width: '100%', marginTop: '20px', padding: '16px'}} onClick={submitForm}>Submit Report</button>
+          {submitStatus === "success" && <p className="status info" style={{color: 'var(--success)', textAlign: 'center'}}>Report Saved!</p>}
+          {submitStatus === "error" && <p className="status error" style={{textAlign: 'center'}}>Name and Store # required.</p>}
+        </div>
+      )}
 
-          <div className="admin-dashboard seven-col">
+      {view === "admin" && user && (
+        <div>
+          {/* SUPER ADMIN: ACCOUNT CREATION */}
+          {adminRole === "super" && (
+            <div className="card" style={{borderLeft: '4px solid var(--accent-orange)'}}>
+              <h3 style={{color: 'var(--accent-orange)', display: 'flex', alignItems: 'center', gap: '8px'}}><UserPlus size={18} /> Manage Admin Accounts</h3>
+              <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '15px'}}>
+                <input placeholder="Email" className="input-field" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} />
+                <input placeholder="Password" type="password" className="input-field" value={newAdminPass} onChange={e => setNewAdminPass(e.target.value)} />
+                <select className="input-field" value={newAdminRole} onChange={e => setNewAdminRole(e.target.value)}>
+                  <option value="viewer">Viewer (Read Only)</option>
+                  <option value="super">Super Admin (Full Control)</option>
+                </select>
+                <button className="nav-btn success" style={{justifyContent: 'center'}} onClick={createAdminAccount}>Create</button>
+              </div>
+              {createAdminStatus && <p className="status info">{createAdminStatus}</p>}
+            </div>
+          )}
+
+          {/* FILTER BAR FOR ALL ADMINS */}
+          <div className="filter-bar">
+            <div>
+              <label className="input-label"><Search size={12} /> Store #</label>
+              <input className="input-field" placeholder="Search Store..." value={filterStore} onChange={e => setFilterStore(e.target.value)} />
+            </div>
+            <div>
+              <label className="input-label"><Filter size={12} /> Inspector</label>
+              <input className="input-field" placeholder="Search Name..." value={filterName} onChange={e => setFilterName(e.target.value)} />
+            </div>
+            <div>
+              <label className="input-label"><Clock size={12} /> From Date</label>
+              <input type="date" className="input-field" value={filterDateStart} onChange={e => setFilterDateStart(e.target.value)} />
+            </div>
+            <div>
+              <label className="input-label"><Clock size={12} /> To Date</label>
+              <input type="date" className="input-field" value={filterDateEnd} onChange={e => setFilterDateEnd(e.target.value)} />
+            </div>
+            <button className="nav-btn danger" style={{height: '46px'}} onClick={resetFilters}><RotateCcw size={16} /> Reset</button>
+          </div>
+
+          {/* DASHBOARD GRID */}
+          <div className="admin-dashboard-grid">
             {paginated.map(r => {
-              const d = r.createdAt?.toDate
-                ? r.createdAt.toDate()
-                : null;
-
-              return (
-                <div key={r.id} className="report-box compact">
-                  <h3>Store #{r.store}</h3>
-                  <p>{r.name}</p>
-
-                  {d && (
-                    <p className="report-time">
-                      <Clock size={12} />{" "}
-                      {d.toLocaleDateString()}{" "}
-                      {d.toLocaleTimeString()}
-                    </p>
-                  )}
-
-                  <div className="nav-group">
-                    <button
-                      className="nav-btn"
-                      onClick={() => exportPDF(r)}
-                    >
-                      <Download size={14} />
-                    </button>
-
-                    <button
-                      className="nav-btn"
-                      onClick={() => deleteReport(r.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+               const d = r.createdAt?.toDate ? r.createdAt.toDate() : new Date();
+               return (
+                <div key={r.id} className="report-box">
+                  <div>
+                    <h3>Store #{r.store}</h3>
+                    <div className="employee-name">{r.name}</div>
+                    <div className="report-time"><Clock size={12} /> {d.toLocaleDateString()}</div>
+                  </div>
+                  
+                  <div style={{marginTop: '12px'}}>
+                    <div style={{color: r.yesCount > 20 ? 'var(--success)' : 'var(--accent-orange)', fontSize: '0.8rem', fontWeight: 700}}>
+                      Score: {r.yesCount}/{r.totalQuestions}
+                    </div>
+                    <div style={{display: 'flex', gap: '6px', marginTop: '10px', justifyContent: 'flex-end'}}>
+                      <button className="nav-btn" style={{padding: '6px'}} title="Download PDF"><Download size={14}/></button>
+                      {adminRole === "super" && (
+                        <button className="nav-btn" style={{background: 'rgba(255,77,79,0.1)', padding: '6px'}} onClick={() => deleteReport(r.id)}>
+                          <Trash2 size={14} color="var(--danger)" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              );
+               )
             })}
           </div>
 
-          <div className="nav-group pagination">
-            <button
-              className="nav-btn"
-              disabled={page === 1}
-              onClick={() => setPage(p => p - 1)}
-            >
-              Prev
-            </button>
-
-            <span>
-              Page {page} / {totalPages}
-            </span>
-
-            <button
-              className="nav-btn"
-              disabled={page === totalPages}
-              onClick={() => setPage(p => p + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </>
+          {/* PAGINATION */}
+          {totalPages > 1 && (
+            <div style={{display: 'flex', justifyContent: 'center', gap: '15px', marginTop: '30px', alignItems: 'center'}}>
+              <button className="nav-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+              <span style={{fontWeight: 700, color: 'var(--accent-blue)'}}>{page} / {totalPages}</span>
+              <button className="nav-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
