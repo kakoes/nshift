@@ -311,7 +311,7 @@ export default function App() {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(22);
       doc.setTextColor(255, 159, 28); // Orange
-      doc.text("CIRCLE K", 105, 20, { align: "center" });
+      doc.text("CK", 105, 20, { align: "center" });
       
       doc.setFontSize(16);
       doc.setTextColor(76, 201, 240); // Blue
